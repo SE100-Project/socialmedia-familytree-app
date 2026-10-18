@@ -1,0 +1,19 @@
+# Chỉ chạy hạ tầng phụ trợ. API và Web chạy trực tiếp bằng `pnpm dev` để hot-reload.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: giapha
+      POSTGRES_PASSWORD: giapha
+      POSTGRES_DB: giapha
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U giapha"]
+      interval: 5s
+      retries: 10
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+volumes:
+  pgdata:

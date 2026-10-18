@@ -1,0 +1,485 @@
+// Lược đồ dữ liệu bám theo Mô hình miền DM-01..DM-22 (sheet P3A_03_MoHinhMien).
+// Quy ước: tên bảng/field tiếng Anh (code), chú thích tiếng Việt khớp với tên lớp trong tài liệu.
+// Phạm vi bản đầu: MỘT dòng họ (Option A), nhưng mọi bảng nghiệp vụ vẫn có clanId để mở rộng sau.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────── Định danh & phân quyền ─────────
+
+enum AccountStatus {
+  ACTIVE
+  LOCKED // ví dụ: chủ hồ sơ đã qua đời (FR-18)
+}
+
+enum RoleType {
+  CLAN_HEAD // Trưởng họ
+  BRANCH_HEAD // Trưởng chi
+  TECH_SUPPORT // Kỹ thuật viên
+}
+
+/// DM-01 TaiKhoan: danh tính đăng nhập, tách khỏi người trên cây
+model Account {
+  id           String        @id @default(uuid())
+  accountCode  String        @unique // mã tài khoản dùng để liên kết/mời (FR-01)
+  phone        String        @unique // bắt buộc, chuẩn hóa E.164 hoặc 0xxxxxxxxx
+  email        String?       @unique
+  passwordHash String
+  status       AccountStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+
+  profile       MemberProfile?
+  roles         RoleAssignment[]
+  joinRequests  JoinRequest[]
+  invitationsIn Invitation[]     @relation("InvitationTarget")
+  invitationsBy Invitation[]     @relation("InvitationSender")
+  notifications Notification[]
+  posts         Post[]
+  comments      Comment[]
+  reactions     Reaction[]
+}
+
+/// DM-02 VaiTroPhanQuyen: quyền + phạm vi, KHÔNG phải quan hệ huyết thống
+model RoleAssignment {
+  id        String    @id @default(uuid())
+  accountId String
+  type      RoleType
+  clanId    String
+  branchId  String? // null với CLAN_HEAD / TECH_SUPPORT
+  validFrom DateTime  @default(now())
+  validTo   DateTime? // null = đang hiệu lực; thu hồi bằng cách set validTo
+
+  account Account @relation(fields: [accountId], references: [id])
+  clan    Clan    @relation(fields: [clanId], references: [id])
+  branch  Branch? @relation(fields: [branchId], references: [id])
+
+  @@index([accountId, validTo])
+  @@index([branchId, type, validTo])
+}
+
+// ───────── Cấu trúc dòng họ & hồ sơ ─────────
+
+/// DM-03 DongHo
+model Clan {
+  id        String   @id @default(uuid())
+  clanCode  String   @unique // mã gia phả (FR-05)
+  name      String
+  createdAt DateTime @default(now())
+
+  branches Branch[]
+  members  MemberProfile[]
+  roles    RoleAssignment[]
+  events   Event[]
+  funds    Fund[]
+  posts    Post[]
+}
+
+/// DM-04 Chi: cho phép chưa có Trưởng chi (không có RoleAssignment BRANCH_HEAD đang hiệu lực)
+model Branch {
+  id     String @id @default(uuid())
+  clanId String
+  name   String
+
+  clan    Clan             @relation(fields: [clanId], references: [id])
+  members MemberProfile[]
+  roles   RoleAssignment[]
+  events  Event[]
+  funds   Fund[]
+  posts   Post[]
+
+  @@unique([clanId, name])
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum MemberStatus {
+  ALIVE
+  DECEASED
+  REMOVED // xóa mềm: giữ nút trung gian để không đứt cây (FR-13)
+}
+
+enum CalendarType {
+  SOLAR
+  LUNAR
+}
+
+/// DM-05 HoSoThanhVien: người trên cây, có thể chưa có tài khoản (hồ sơ cầu nối - FR-11)
+model MemberProfile {
+  id           String        @id @default(uuid())
+  clanId       String
+  branchId     String?
+  accountId    String?       @unique // 0..1 tài khoản; liên kết sau khi được duyệt (FR-08)
+  fullName     String
+  gender       Gender
+  bio          String?
+  birthDate    DateTime?     @db.Date
+  deathDate    DateTime?     @db.Date
+  deathCalendar CalendarType? // ngày mất khai theo âm hay dương (FR-29)
+  status       MemberStatus  @default(ALIVE)
+  generation   Int? // thế hệ; có thể tính lại khi quan hệ đổi (FR-17)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  clan    Clan     @relation(fields: [clanId], references: [id])
+  branch  Branch?  @relation(fields: [branchId], references: [id])
+  account Account? @relation(fields: [accountId], references: [id])
+  privacy PrivacySetting?
+
+  relationsFrom Relationship[] @relation("RelFrom")
+  relationsTo   Relationship[] @relation("RelTo")
+
+  @@index([clanId, fullName])
+  @@index([branchId])
+}
+
+enum RelationType {
+  PARENT_CHILD // from = cha/mẹ, to = con
+  SPOUSE // vợ/chồng: hiển thị là nút ngang hàng (quyết định nhóm: Option 1)
+}
+
+/// DM-06 QuanHePhaHe. Ràng buộc "không tự tham chiếu, không vòng" kiểm ở Service + CHECK SQL trong migration.
+model Relationship {
+  id         String       @id @default(uuid())
+  type       RelationType
+  fromId     String
+  toId       String
+  startDate  DateTime?    @db.Date // ví dụ ngày kết hôn
+  active     Boolean      @default(true)
+
+  from MemberProfile @relation("RelFrom", fields: [fromId], references: [id])
+  to   MemberProfile @relation("RelTo", fields: [toId], references: [id])
+
+  @@unique([type, fromId, toId])
+  @@index([fromId])
+  @@index([toId])
+}
+
+/// DM-11 CauHinhRiengTu
+model PrivacySetting {
+  id          String        @id @default(uuid())
+  profileId   String        @unique
+  phoneScope  VisibilityScope @default(BRANCH)
+  addressScope VisibilityScope @default(BRANCH)
+  updatedAt   DateTime      @updatedAt
+
+  profile MemberProfile @relation(fields: [profileId], references: [id])
+}
+
+enum VisibilityScope {
+  PRIVATE
+  BRANCH // trong chi
+  CLAN // toàn họ (không phải công khai Internet)
+}
+
+// ───────── Quy trình gửi – duyệt ─────────
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum JoinRequestKind {
+  BY_ACCOUNT_CODE // FR-04
+  BY_CLAN_CODE // FR-05
+}
+
+/// DM-07 YeuCauGiaNhap
+model JoinRequest {
+  id               String          @id @default(uuid())
+  requesterId      String
+  kind             JoinRequestKind
+  referenceCode    String // mã tài khoản hoặc mã gia phả
+  declaredRelation String? // quan hệ / vai vế đề nghị
+  targetProfileId  String? // hồ sơ có sẵn cần liên kết (FR-08)
+  status           RequestStatus   @default(PENDING)
+  createdAt        DateTime        @default(now())
+
+  requester Account          @relation(fields: [requesterId], references: [id])
+  decision  ApprovalDecision?
+}
+
+/// DM-08 LoiMoiGiaNhap
+model Invitation {
+  id             String        @id @default(uuid())
+  senderId       String
+  targetId       String
+  proposedRole   String?
+  targetProfileId String?
+  status         RequestStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+
+  sender Account @relation("InvitationSender", fields: [senderId], references: [id])
+  target Account @relation("InvitationTarget", fields: [targetId], references: [id])
+}
+
+enum ProfileRequestType {
+  ADD_CHILD
+  ADD_SPOUSE
+  MARK_DECEASED
+  EDIT_PROFILE
+  ADD_RELATIVE
+  REMOVE_PROFILE
+}
+
+/// DM-09 YeuCauCapNhatPhaHe
+model ProfileUpdateRequest {
+  id          String             @id @default(uuid())
+  clanId      String
+  branchId    String?
+  requesterId String
+  type        ProfileRequestType
+  subjectId   String? // hồ sơ bị tác động
+  before      Json?
+  proposed    Json
+  reason      String?
+  status      RequestStatus      @default(PENDING)
+  createdAt   DateTime           @default(now())
+
+  decision ApprovalDecision?
+
+  @@index([branchId, status])
+}
+
+/// DM-10 QuyetDinhDuyet. Người duyệt phải khác người tạo (BR-12) - kiểm ở Service.
+model ApprovalDecision {
+  id                     String    @id @default(uuid())
+  approverId             String
+  approved               Boolean
+  reason                 String?
+  decidedAt              DateTime  @default(now())
+  joinRequestId          String?   @unique
+  profileUpdateRequestId String?   @unique
+  contributionRequestId  String?   @unique
+
+  joinRequest          JoinRequest?          @relation(fields: [joinRequestId], references: [id])
+  profileUpdateRequest ProfileUpdateRequest? @relation(fields: [profileUpdateRequestId], references: [id])
+  contributionRequest  ContributionRequest?  @relation(fields: [contributionRequestId], references: [id])
+}
+
+// ───────── Bảng tin ─────────
+
+enum ContentStatus {
+  PUBLISHED
+  HIDDEN
+  DELETED
+}
+
+/// DM-12 BaiViet: xuất bản ngay, hậu kiểm
+model Post {
+  id        String        @id @default(uuid())
+  clanId    String
+  branchId  String? // null = toàn họ
+  authorId  String
+  category  String
+  content   String
+  pinned    Boolean       @default(false)
+  official  Boolean       @default(false) // thông báo chính thức (FR-26)
+  status    ContentStatus @default(PUBLISHED)
+  createdAt DateTime      @default(now())
+
+  clan        Clan         @relation(fields: [clanId], references: [id])
+  branch      Branch?      @relation(fields: [branchId], references: [id])
+  author      Account      @relation(fields: [authorId], references: [id])
+  comments    Comment[]
+  reactions   Reaction[]
+  attachments Attachment[]
+
+  @@index([clanId, branchId, createdAt])
+}
+
+/// DM-13 BinhLuan
+model Comment {
+  id        String        @id @default(uuid())
+  postId    String
+  authorId  String
+  content   String
+  status    ContentStatus @default(PUBLISHED)
+  createdAt DateTime      @default(now())
+
+  post   Post    @relation(fields: [postId], references: [id])
+  author Account @relation(fields: [authorId], references: [id])
+}
+
+/// DM-14 CamXuc
+model Reaction {
+  id        String   @id @default(uuid())
+  postId    String
+  accountId String
+  kind      String   @default("like")
+  createdAt DateTime @default(now())
+
+  post    Post    @relation(fields: [postId], references: [id])
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([postId, accountId])
+}
+
+// ───────── Sự kiện & thông báo ─────────
+
+/// DM-15 SuKien (lịch giỗ tự sinh có sourceProfileId)
+model Event {
+  id              String       @id @default(uuid())
+  clanId          String
+  branchId        String? // null = toàn họ
+  title           String
+  description     String?
+  location        String?
+  calendar        CalendarType
+  originalDate    String // ngày gốc theo lịch đã chọn, vd "15/07" (âm) hoặc ISO (dương)
+  solarDate       DateTime?    @db.Date // ngày dương quy đổi để hiển thị/nhắc (FR-29)
+  recurringYearly Boolean      @default(false)
+  sourceProfileId String? // hồ sơ đã mất → lịch giỗ
+  cancelled       Boolean      @default(false)
+
+  clan   Clan    @relation(fields: [clanId], references: [id])
+  branch Branch? @relation(fields: [branchId], references: [id])
+
+  @@index([clanId, solarDate])
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+/// DM-16 ThongBao. Đồng thời là "outbox": job cron quét các dòng EMAIL chưa gửi (sentAt null).
+model Notification {
+  id        String              @id @default(uuid())
+  accountId String
+  channel   NotificationChannel @default(IN_APP)
+  type      String
+  content   String
+  refType   String?
+  refId     String?
+  read      Boolean             @default(false)
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, read])
+  @@index([channel, sentAt])
+}
+
+// ───────── Quỹ ─────────
+
+enum FundScope {
+  CLAN
+  BRANCH
+}
+
+/// DM-17 Quy. Số dư KHÔNG lưu cứng: tính từ FundTransaction (FR-38).
+model Fund {
+  id             String    @id @default(uuid())
+  clanId         String
+  branchId       String?
+  scope          FundScope
+  name           String
+  openingBalance Decimal   @default(0) @db.Decimal(18, 0) // VND
+
+  clan         Clan              @relation(fields: [clanId], references: [id])
+  branch       Branch?           @relation(fields: [branchId], references: [id])
+  campaigns    Campaign[]
+  transactions FundTransaction[]
+}
+
+/// DM-18 DotDongGop
+model Campaign {
+  id      String    @id @default(uuid())
+  fundId  String
+  name    String
+  purpose String?
+  startAt DateTime?
+  endAt   DateTime?
+
+  fund     Fund                  @relation(fields: [fundId], references: [id])
+  requests ContributionRequest[]
+}
+
+/// DM-19 YeuCauDongGop: chờ duyệt thì KHÔNG tăng số dư
+model ContributionRequest {
+  id           String        @id @default(uuid())
+  campaignId   String
+  requesterId  String
+  amount       Decimal       @db.Decimal(18, 0)
+  transferredAt DateTime
+  status       RequestStatus @default(PENDING)
+  createdAt    DateTime      @default(now())
+
+  campaign    Campaign          @relation(fields: [campaignId], references: [id])
+  decision    ApprovalDecision?
+  transaction FundTransaction?
+  attachments Attachment[]
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+/// DM-20 GiaoDichQuy: bất biến (NFR-10) - điều chỉnh bằng giao dịch đảo, không sửa/xóa.
+model FundTransaction {
+  id                    String          @id @default(uuid())
+  fundId                String
+  type                  TransactionType
+  amount                Decimal         @db.Decimal(18, 0)
+  occurredAt            DateTime
+  description           String
+  contributionRequestId String?         @unique // 1 yêu cầu → tối đa 1 giao dịch thu
+  reversesId            String?
+  createdById           String
+  createdAt             DateTime        @default(now())
+
+  fund                Fund                 @relation(fields: [fundId], references: [id])
+  contributionRequest ContributionRequest? @relation(fields: [contributionRequestId], references: [id])
+  attachments         Attachment[]
+
+  @@index([fundId, occurredAt])
+}
+
+/// DM-21 ChungTu / tệp đính kèm
+model Attachment {
+  id                    String   @id @default(uuid())
+  fileName              String
+  mimeType              String
+  sizeBytes             Int
+  storageKey            String // khóa trong StorageService (đĩa local / S3)
+  createdAt             DateTime @default(now())
+  postId                String?
+  contributionRequestId String?
+  fundTransactionId     String?
+
+  post                Post?                @relation(fields: [postId], references: [id])
+  contributionRequest ContributionRequest? @relation(fields: [contributionRequestId], references: [id])
+  fundTransaction     FundTransaction?     @relation(fields: [fundTransactionId], references: [id])
+}
+
+// ───────── Truy vết ─────────
+
+/// DM-22 NhatKyThayDoi: chỉ INSERT, không có API sửa/xóa (FR-46, NFR-10)
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityType String
+  entityId   String
+  action     String
+  before     Json?
+  after      Json?
+  actorId    String?
+  reason     String?
+  at         DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([at])
+}

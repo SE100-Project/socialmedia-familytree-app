@@ -1,0 +1,28 @@
+{
+  "name": "socialmedia-familytree-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mạng xã hội nội bộ và quản lý cây gia phả dòng họ - Nhóm 7",
+  "packageManager": "pnpm@10.0.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:api": "pnpm --filter api dev",
+    "dev:web": "pnpm --filter web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter api prisma:migrate",
+    "db:studio": "pnpm --filter api prisma:studio"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "prisma", "@nestjs/core", "@node-rs/argon2", "esbuild"]
+  },
+  "devDependencies": {
+    "prettier": "^3.3.0"
+  }
+}
