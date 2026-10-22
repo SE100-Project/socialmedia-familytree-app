@@ -4,7 +4,9 @@
   "private": true,
   "description": "Mạng xã hội nội bộ và quản lý cây gia phả dòng họ - Nhóm 7",
   "packageManager": "pnpm@10.0.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "dev:api": "pnpm --filter api dev",
@@ -19,10 +21,18 @@
     "docker:up": "docker compose --env-file .env.docker up -d --build",
     "docker:down": "docker compose --env-file .env.docker down",
     "db:migrate": "pnpm --filter api prisma:migrate",
-    "db:studio": "pnpm --filter api prisma:studio"
+    "db:studio": "pnpm --filter api prisma:studio",
+    "db:init": "powershell -ExecutionPolicy Bypass -File ./scripts/chay_khoi_tao_db.ps1"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "prisma", "@nestjs/core", "@node-rs/argon2", "esbuild"]
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "@nestjs/core",
+      "@node-rs/argon2",
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "prettier": "^3.3.0"
