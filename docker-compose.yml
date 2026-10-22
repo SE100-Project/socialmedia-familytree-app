@@ -1,19 +1,91 @@
-# Chỉ chạy hạ tầng phụ trợ. API và Web chạy trực tiếp bằng `pnpm dev` để hot-reload.
 services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: giapha
-      POSTGRES_PASSWORD: giapha
-      POSTGRES_DB: giapha
-    ports: ["5432:5432"]
-    volumes: ["pgdata:/var/lib/postgresql/data"]
+      POSTGRES_USER: ${POSTGRES_USER:-giapha}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-giapha}
+      POSTGRES_DB: ${POSTGRES_DB:-giapha}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U giapha"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   mailpit:
     image: axllent/mailpit:latest
-    ports: ["1025:1025", "8025:8025"]
+    ports:
+      - "127.0.0.1:${SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    working_dir: /workspace
+    command:
+      - sh
+      - -c
+      - pnpm --filter api exec prisma migrate deploy && pnpm dev:api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-giapha}:${POSTGRES_PASSWORD:-giapha}@db:5432/${POSTGRES_DB:-giapha}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-development-secret-change-me}
+      JWT_ACCESS_TTL: 15m
+      PORT: 3000
+      WEB_ORIGIN: http://localhost:5173
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: Gia phả <no-reply@giapha.local>
+    ports:
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+    volumes:
+      - .:/workspace
+      - root_node_modules:/workspace/node_modules
+      - api_node_modules:/workspace/apps/api/node_modules
+      - web_node_modules:/workspace/apps/web/node_modules
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    working_dir: /workspace
+    command: pnpm --filter web exec vite --host 0.0.0.0
+    environment:
+      API_PROXY_TARGET: http://api:3000
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    volumes:
+      - .:/workspace
+      - root_node_modules:/workspace/node_modules
+      - api_node_modules:/workspace/apps/api/node_modules
+      - web_node_modules:/workspace/apps/web/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  root_node_modules:
+  api_node_modules:
+  web_node_modules:

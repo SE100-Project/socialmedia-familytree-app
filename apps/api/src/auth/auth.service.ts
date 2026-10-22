@@ -42,7 +42,12 @@ export class AuthService {
   async login(dto: LoginDto) {
     const phone = normalizeVnPhone(dto.phone);
     const acc = phone ? await this.prisma.account.findUnique({ where: { phone } }) : null;
-    const ok = acc && acc.status === 'ACTIVE' && (await verify(acc.passwordHash, dto.password));
+    const ok =
+      acc &&
+      acc.status === 'ACTIVE' &&
+      acc.authType === 'LOCAL' &&
+      !!acc.passwordHash &&
+      (await verify(acc.passwordHash, dto.password));
     if (!acc || !ok) throw new UnauthorizedException('Sai số điện thoại hoặc mật khẩu');
     return { accessToken: await this.jwt.signAsync({ sub: acc.id }) };
   }

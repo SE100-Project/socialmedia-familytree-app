@@ -14,8 +14,10 @@
     "typecheck": "pnpm -r typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:up": "docker compose up -d",
-    "db:down": "docker compose down",
+    "db:up": "docker compose --env-file .env.docker up -d db mailpit",
+    "db:down": "docker compose --env-file .env.docker stop db mailpit",
+    "docker:up": "docker compose --env-file .env.docker up -d --build",
+    "docker:down": "docker compose --env-file .env.docker down",
     "db:migrate": "pnpm --filter api prisma:migrate",
     "db:studio": "pnpm --filter api prisma:studio"
   },
