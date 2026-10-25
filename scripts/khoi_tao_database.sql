@@ -24,9 +24,9 @@ HƯỚNG DẪN SỬ DỤNG:
 
 BEGIN;
 
--- 1. Bật extension mở rộng cần thiết
-CREATE EXTENSION IF NOT EXISTS citext;
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- 1. Bật extension mở rộng cần thiết (BỎ citext và pgcrypto nếu không dùng)
+-- CREATE EXTENSION IF NOT EXISTS citext; -- Bỏ do grep không thấy dùng
+-- CREATE EXTENSION IF NOT EXISTS pgcrypto; -- Bỏ do grep không thấy dùng
 
 -- 2. Tạo và cấu hình Schema gia_pha
 CREATE SCHEMA IF NOT EXISTS gia_pha;
@@ -463,7 +463,23 @@ DO $$ DECLARE t TEXT; BEGIN
   END LOOP;
 END $$;
 
--- Trigger chong tao vong to tien; khoa dong ho de tranh hai cap nhat dong thoi tao vong.
+-- [B1] Trigger kiem soat chuyen trang thai yeu_cau_dong_gop (3 trang thai, khong co CHO_BO_SUNG).
+CREATE OR REPLACE FUNCTION fn_kiem_tra_trang_thai_dong_gop() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.trang_thai=OLD.trang_thai THEN RETURN NEW; END IF;
+  -- CHO_DUYET -> DA_XAC_NHAN hoac BI_TU_CHOI: hop le
+  IF OLD.trang_thai='CHO_DUYET' AND NEW.trang_thai IN ('DA_XAC_NHAN','BI_TU_CHOI') THEN RETURN NEW; END IF;
+  -- DA_XAC_NHAN va BI_TU_CHOI la trang thai ket thuc, khong duoc doi lai
+  RAISE EXCEPTION 'Chuyen trang thai dong gop khong hop le: % -> % (id=%)',
+    OLD.trang_thai, NEW.trang_thai, NEW.id;
+END $$;
+DROP TRIGGER IF EXISTS trg_ycdg_chuyen_trang_thai ON yeu_cau_dong_gop;
+CREATE TRIGGER trg_ycdg_chuyen_trang_thai BEFORE UPDATE OF trang_thai ON yeu_cau_dong_gop
+  FOR EACH ROW EXECUTE FUNCTION fn_kiem_tra_trang_thai_dong_gop();
+
+-- [B6] Trigger chong tao vong to tien.
+-- Thay FOR UPDATE tren bang dong_ho (khoa toan hang, bottleneck dong thoi)
+-- bang pg_advisory_xact_lock(dong_ho_id) — chi block cung dong ho, nhe hon.
 CREATE OR REPLACE FUNCTION fn_chan_vong_pha_he() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE dong_ho_a BIGINT; dong_ho_b BIGINT; tao_vong BOOLEAN;
 BEGIN
@@ -471,7 +487,7 @@ BEGIN
   SELECT dong_ho_id INTO dong_ho_b FROM ho_so_thanh_vien WHERE id=NEW.den_ho_so_id;
   IF dong_ho_a IS NULL OR dong_ho_a<>dong_ho_b THEN RAISE EXCEPTION 'Hai ho so phai thuoc cung dong ho'; END IF;
   IF NOT NEW.hieu_luc OR NEW.loai_quan_he='VO_CHONG' THEN RETURN NEW; END IF;
-  PERFORM 1 FROM dong_ho WHERE id=dong_ho_a FOR UPDATE;
+  PERFORM pg_advisory_xact_lock(dong_ho_a);
   WITH RECURSIVE hau_due(id) AS (
     SELECT NEW.den_ho_so_id
     UNION
@@ -557,235 +573,7 @@ LEFT JOIN cam_xuc x ON x.bai_viet_id=b.id
 WHERE b.trang_thai='DA_XUAT_BAN'
 GROUP BY b.id,b.dong_ho_id,b.chi_id,b.tao_luc;
 
--- ================================================================================
--- BỘ DỮ LIỆU MẪU (SEED DATA) CHO CƠ SỞ DỮ LIỆU GIA PHẢ
--- ================================================================================
-
--- 1. DÒNG HỌ
-INSERT INTO dong_ho (id, ma_gia_pha, ten, trang_thai)
-OVERRIDING SYSTEM VALUE
-VALUES (1, 'GP-NGUYEN-2026', 'Dòng họ Nguyễn Phúc', 'DANG_HOAT_DONG')
-ON CONFLICT (id) DO UPDATE SET ten = EXCLUDED.ten;
-
--- 2. CHI TỘC
-INSERT INTO chi (id, dong_ho_id, ten_chi)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 'Chi Trưởng (Nhất Chi)'),
-  (2, 1, 'Chi Thứ (Nhị Chi)')
-ON CONFLICT (id) DO UPDATE SET ten_chi = EXCLUDED.ten_chi;
-
--- 3. HỒ SƠ THÀNH VIÊN (3 THẾ HỆ)
--- Đời 1: Cụ Thủy tổ (Khởi) & Cụ Bà (Lành) - Đều đã mất
--- Đời 2: Ông An (Trưởng họ - Chi Trưởng), Bà Hoa (Vợ), Ông Bình (Trưởng chi - Chi Thứ)
--- Đời 3: Anh Cường, Chị Dung (Con của Ông An & Bà Hoa)
-INSERT INTO ho_so_thanh_vien (id, dong_ho_id, chi_id, ma_thanh_vien, ho_ten, gioi_tinh, ngay_sinh, ngay_mat, loai_lich_ngay_mat, so_dien_thoai, noi_an_tang, the_he, trang_thai, version)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, NULL, 'TV-001', 'Nguyễn Phúc Khởi', 'NAM', '1920-01-01', '2000-08-15', 'AM', NULL, 'Khu lăng mộ tổ họ Nguyễn Phúc, Phú Vang, Thừa Thiên Huế', 1, 'DA_MAT', 1),
-  (2, 1, NULL, 'TV-002', 'Trần Thị Lành', 'NU', '1925-05-10', '2005-03-20', 'AM', NULL, 'Khu nghĩa trang gia tộc, Phú Vang, Thừa Thiên Huế', 1, 'DA_MAT', 1),
-  (3, 1, 1, 'TV-003', 'Nguyễn Phúc An', 'NAM', '1950-02-15', NULL, NULL, '+84901234567', NULL, 2, 'DANG_SONG', 1),
-  (4, 1, 1, 'TV-004', 'Lê Thị Hoa', 'NU', '1953-06-20', NULL, NULL, '+84902345678', NULL, 2, 'DANG_SONG', 1),
-  (5, 1, 2, 'TV-005', 'Nguyễn Phúc Bình', 'NAM', '1955-09-12', NULL, NULL, '+84912345678', NULL, 2, 'DANG_SONG', 1),
-  (6, 1, 1, 'TV-006', 'Nguyễn Phúc Cường', 'NAM', '1980-11-20', NULL, NULL, '+84923456789', NULL, 3, 'DANG_SONG', 1),
-  (7, 1, 1, 'TV-007', 'Nguyễn Phúc Dung', 'NU', '1985-04-18', NULL, NULL, '+84934567890', NULL, 3, 'DANG_SONG', 1)
-ON CONFLICT (id) DO UPDATE SET ho_ten = EXCLUDED.ho_ten;
-
--- Cập nhật Nút gốc của Dòng họ là Cụ Thủy tổ
-UPDATE dong_ho SET ho_so_goc_id = 1 WHERE id = 1;
-
--- Cập nhật Trưởng chi cho Chi Trưởng và Chi Thứ
-UPDATE chi SET ho_so_truong_chi_id = 3 WHERE id = 1;
-UPDATE chi SET ho_so_truong_chi_id = 5 WHERE id = 2;
-
--- 4. TÀI KHOẢN NGƯỜI DÙNG
-INSERT INTO tai_khoan (id, ma_tai_khoan, so_dien_thoai, email, mat_khau_hash, loai_xac_thuc, google_sub, trang_thai)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 'TK-001', '+84901234567', 'truongho@giapha.vn', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE6/1Q5qX0W1v0G2J5Q$R5N5M2mYjPqL7P8b1N3rYQ', 'NOI_BO', NULL, 'HOAT_DONG'),
-  (2, 'TK-002', '+84912345678', 'truongchi@giapha.vn', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE6/1Q5qX0W1v0G2J5Q$R5N5M2mYjPqL7P8b1N3rYQ', 'NOI_BO', NULL, 'HOAT_DONG'),
-  (3, 'TK-003', '+84923456789', 'thanhvien@giapha.vn', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE6/1Q5qX0W1v0G2J5Q$R5N5M2mYjPqL7P8b1N3rYQ', 'NOI_BO', NULL, 'HOAT_DONG'),
-  (4, 'TK-004', '+84934567890', 'nguyenphucdung.dev@gmail.com', NULL, 'GOOGLE', 'google-oauth2|109283746582910283746', 'HOAT_DONG')
-ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
-
--- 5. XÁC THỰC TOTP (BẢO MẬT 2FA CHO TRƯỞNG HỌ)
-INSERT INTO xac_thuc_totp (id, tai_khoan_id, khoa_bi_mat_ma_hoa, da_kich_hoat)
-OVERRIDING SYSTEM VALUE
-VALUES (1, 1, 'enc_aes256_mock_secret_key_truong_ho_2fa', true)
-ON CONFLICT (id) DO NOTHING;
-
--- 6. LIÊN KẾT TÀI KHOẢN VỚI HỒ SƠ
-INSERT INTO tai_khoan_ho_so (id, tai_khoan_id, dong_ho_id, ho_so_id)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 1, 3), -- TK 1 (truongho) -> Hồ sơ Ông An
-  (2, 2, 1, 5), -- TK 2 (truongchi) -> Hồ sơ Ông Bình
-  (3, 3, 1, 6), -- TK 3 (thanhvien) -> Hồ sơ Anh Cường
-  (4, 4, 1, 7)  -- TK 4 (google user) -> Hồ sơ Chị Dung
-ON CONFLICT (id) DO NOTHING;
-
--- 7. VAI TRÒ & PHÂN QUYỀN
-INSERT INTO vai_tro_phan_quyen (id, tai_khoan_id, loai_vai_tro, pham_vi, dong_ho_id, chi_id, hieu_luc_tu)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 'TRUONG_HO', 'TOAN_HO', 1, NULL, CURRENT_DATE),
-  (2, 2, 'TRUONG_CHI', 'CHI', NULL, 2, CURRENT_DATE),
-  (3, 3, 'THANH_VIEN', 'CHI', NULL, 1, CURRENT_DATE),
-  (4, 4, 'THANH_VIEN', 'CHI', NULL, 1, CURRENT_DATE)
-ON CONFLICT (id) DO NOTHING;
-
--- 8. QUAN HỆ PHẢ HỆ (CÂY GIA PHẢ ĐẦY ĐỦ 3 ĐỜI)
-INSERT INTO quan_he_pha_he (id, tu_ho_so_id, den_ho_so_id, loai_quan_he, hieu_luc)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  -- Đời 1: Vợ chồng Cụ Khởi - Cụ Lành
-  (1, 1, 2, 'VO_CHONG', true),
-  -- Đời 1 -> Đời 2: Cụ Khởi sinh Ông An & Ông Bình
-  (2, 1, 3, 'CHA_CON', true),
-  (3, 2, 3, 'ME_CON', true),
-  (4, 1, 5, 'CHA_CON', true),
-  (5, 2, 5, 'ME_CON', true),
-  -- Đời 2: Vợ chồng Ông An - Bà Hoa
-  (6, 3, 4, 'VO_CHONG', true),
-  -- Đời 2 -> Đời 3: Ông An & Bà Hoa sinh Anh Cường & Chị Dung
-  (7, 3, 6, 'CHA_CON', true),
-  (8, 4, 6, 'ME_CON', true),
-  (9, 3, 7, 'CHA_CON', true),
-  (10, 4, 7, 'ME_CON', true)
-ON CONFLICT (id) DO NOTHING;
-
--- 9. CẤU HÌNH QUYỀN RIÊNG TƯ
-INSERT INTO cau_hinh_rieng_tu (id, ho_so_id, truong, pham_vi)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 3, 'SO_DIEN_THOAI', 'TOAN_HO'),
-  (2, 6, 'SO_DIEN_THOAI', 'TRONG_CHI'),
-  (3, 7, 'EMAIL', 'CHI_TOI')
-ON CONFLICT (id) DO NOTHING;
-
--- 10. BẢNG TIN DÒNG HỌ & TƯƠNG TÁC
-INSERT INTO bai_viet (id, tai_khoan_id, dong_ho_id, chi_id, noi_dung, pham_vi, chuyen_muc, trang_thai, ghim)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 1, NULL, 'Kính báo toàn thể con cháu dòng họ: Công trình trùng tu mái ngói và cổng Từ Đường Dòng Họ đã hoàn tất tốt đẹp trước ngày giỗ tổ.', 'TOAN_HO', 'GOC_HOAI_NIEM', 'DA_XUAT_BAN', true),
-  (2, 3, 1, 1, 'Chia sẻ cùng bà con trong Chi Trưởng: Cháu Nguyễn Phúc Dung đã bảo vệ xuất sắc luận án Thạc sĩ tại Đại học Quốc gia!', 'TOAN_HO', 'KHUYEN_HOC_THANH_TICH', 'DA_XUAT_BAN', false)
-ON CONFLICT (id) DO NOTHING;
-
--- Tệp đính kèm bài viết
-INSERT INTO tep_dinh_kem (id, bai_viet_id, yeu_cau_cap_nhat_id, yeu_cau_gia_nhap_id, tai_khoan_tai_len_id, ten_tep, loai_tep, dung_luong, duong_dan_luu)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, NULL, NULL, 1, 'nha_tho_to_hoan_thanh.jpg', 'image/jpeg', 2048576, 'https://storage.giapha.vn/media/2026/tu_duong_1.jpg')
-ON CONFLICT (id) DO NOTHING;
-
--- Bình luận bài viết
-INSERT INTO binh_luan (id, bai_viet_id, tai_khoan_id, noi_dung, trang_thai)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 2, 'Hoan hỉ và cảm ơn Bác Trưởng họ cùng ban kiến thiết đã dốc sức vì việc họ.', 'HIEN_THI'),
-  (2, 2, 1, 'Bác chúc mừng cháu Dung đã làm rạng danh dòng họ!', 'HIEN_THI')
-ON CONFLICT (id) DO NOTHING;
-
--- Cảm xúc bài viết
-INSERT INTO cam_xuc (id, bai_viet_id, tai_khoan_id, loai)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 2, 'THICH'),
-  (2, 1, 3, 'TIM'),
-  (3, 2, 1, 'TIM'),
-  (4, 2, 2, 'THICH')
-ON CONFLICT (id) DO NOTHING;
-
--- 11. SỰ KIỆN DÒNG HỌ & LỊCH GIỖ
-INSERT INTO su_kien (id, dong_ho_id, chi_id, ho_so_id, ten, ngay_goc, loai_lich, ngay_duong, dia_diem, pham_vi, loai_su_kien)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, NULL, 1, 'Lễ Giỗ Cụ Thủy Tổ Nguyễn Phúc Khởi', '2000-08-15', 'AM', '2026-09-25', 'Từ Đường Dòng Họ, Thừa Thiên Huế', 'TOAN_HO', 'LICH_GIO'),
-  (2, 1, NULL, NULL, 'Hội Nghị Khuyến Học & Tất Niên 2026', '2026-12-28', 'DUONG', '2026-12-28', 'Nhà Văn Hóa Dòng Họ', 'TOAN_HO', 'SU_KIEN_THUONG')
-ON CONFLICT (id) DO NOTHING;
-
--- 12. THÔNG BÁO HỆ THỐNG
-INSERT INTO thong_bao (id, tai_khoan_id, su_kien_id, loai, noi_dung, da_doc, trang_thai_gui)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 2, 1, 'NHAC_SU_KIEN', 'Sắp tới ngày 15/08 Âm lịch là Lễ Giỗ Cụ Thủy Tổ, kính mời quý chi sắp xếp về dự lễ.', false, 'DA_GUI'),
-  (2, 3, 1, 'NHAC_SU_KIEN', 'Sắp tới ngày 15/08 Âm lịch là Lễ Giỗ Cụ Thủy Tổ, kính mời quý chi sắp xếp về dự lễ.', true, 'DA_GUI')
-ON CONFLICT (id) DO NOTHING;
-
--- 13. BẦU CHỌN TRƯỞNG HỌ
-INSERT INTO phien_chon_truong_ho (id, dong_ho_id, trang_thai, bat_dau_luc, ket_thuc_luc, ung_vien_duoc_chon_id, nguoi_xac_nhan_id, ghi_chu_ket_qua)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 'DA_KET_THUC', '2026-01-01 08:00:00+07', '2026-01-15 17:00:00+07', 3, 1, 'Tín nhiệm Bác Nguyễn Phúc An tiếp tục giữ vai trò Trưởng họ')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO phieu_bau_truong_ho (id, phien_id, dong_ho_id, chi_id, truong_chi_tai_khoan_id, ung_vien_ho_so_id, lua_chon, ly_do)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 1, 2, 2, 3, 'DONG_Y', 'Bác An uy tín và gương mẫu')
-ON CONFLICT (id) DO NOTHING;
-
--- 14. QUẢN LÝ QUỸ & GIAO DỊCH THU CHI (Kiểm tra View v_so_du_quy)
-INSERT INTO quy (id, dong_ho_id, chi_id, ten, cap_quy, so_du_dau_ky)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, NULL, 'Quỹ Khuyến Học Dòng Họ Nguyễn Phúc', 'TOAN_HO', 10000000),
-  (2, 1, NULL, 'Quỹ Trùng Tu Từ Đường Dòng Họ', 'TOAN_HO', 50000000)
-ON CONFLICT (id) DO UPDATE SET ten = EXCLUDED.ten;
-
--- Đợt vận động đóng góp
-INSERT INTO dot_dong_gop (id, quy_id, ten, muc_dich, bat_dau, ket_thuc)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 'Đợt Vận Động Khuyến Học Năm Học 2026 - 2027', 'Học bổng cho các cháu đỗ đại học và vượt khó học giỏi', '2026-09-01', '2026-11-30')
-ON CONFLICT (id) DO NOTHING;
-
--- Yêu cầu đóng góp từ thành viên
-INSERT INTO yeu_cau_dong_gop (id, dot_dong_gop_id, tai_khoan_id, so_tien, thoi_diem_chuyen, trang_thai)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 3, 5000000, '2026-10-01 10:30:00+07', 'DA_XAC_NHAN')
-ON CONFLICT (id) DO NOTHING;
-
--- Giao dịch thu và chi thực tế
-INSERT INTO giao_dich_quy (id, quy_id, yeu_cau_dong_gop_id, loai, so_tien, ngay, noi_dung)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, 1, 'THU', 5000000, '2026-10-01', 'Thu tiền ủng hộ quỹ khuyến học từ anh Cường'),
-  (2, 1, NULL, 'CHI', 3000000, '2026-10-15', 'Chi khen thưởng học bổng cho các cháu học sinh giỏi')
-ON CONFLICT (id) DO NOTHING;
-
--- Chứng từ đính kèm
-INSERT INTO chung_tu (id, giao_dich_quy_id, yeu_cau_dong_gop_id, ten_tep, loai_tep, duong_dan_luu)
-OVERRIDING SYSTEM VALUE
-VALUES 
-  (1, 1, NULL, 'bien_lai_thu_001.pdf', 'application/pdf', 'https://storage.giapha.vn/chung_tu/2026/bl_001.pdf'),
-  (2, NULL, 1, 'sao_ke_ck_anh_cuong.png', 'image/png', 'https://storage.giapha.vn/chung_tu/2026/sk_cuong.png')
-ON CONFLICT (id) DO NOTHING;
-
--- Đồng bộ giá trị SEQUENCE cho các bảng identity
-SELECT setval(pg_get_serial_sequence('dong_ho', 'id'), COALESCE(MAX(id), 1)) FROM dong_ho;
-SELECT setval(pg_get_serial_sequence('chi', 'id'), COALESCE(MAX(id), 1)) FROM chi;
-SELECT setval(pg_get_serial_sequence('ho_so_thanh_vien', 'id'), COALESCE(MAX(id), 1)) FROM ho_so_thanh_vien;
-SELECT setval(pg_get_serial_sequence('tai_khoan', 'id'), COALESCE(MAX(id), 1)) FROM tai_khoan;
-SELECT setval(pg_get_serial_sequence('xac_thuc_totp', 'id'), COALESCE(MAX(id), 1)) FROM xac_thuc_totp;
-SELECT setval(pg_get_serial_sequence('tai_khoan_ho_so', 'id'), COALESCE(MAX(id), 1)) FROM tai_khoan_ho_so;
-SELECT setval(pg_get_serial_sequence('vai_tro_phan_quyen', 'id'), COALESCE(MAX(id), 1)) FROM vai_tro_phan_quyen;
-SELECT setval(pg_get_serial_sequence('quan_he_pha_he', 'id'), COALESCE(MAX(id), 1)) FROM quan_he_pha_he;
-SELECT setval(pg_get_serial_sequence('cau_hinh_rieng_tu', 'id'), COALESCE(MAX(id), 1)) FROM cau_hinh_rieng_tu;
-SELECT setval(pg_get_serial_sequence('bai_viet', 'id'), COALESCE(MAX(id), 1)) FROM bai_viet;
-SELECT setval(pg_get_serial_sequence('tep_dinh_kem', 'id'), COALESCE(MAX(id), 1)) FROM tep_dinh_kem;
-SELECT setval(pg_get_serial_sequence('binh_luan', 'id'), COALESCE(MAX(id), 1)) FROM binh_luan;
-SELECT setval(pg_get_serial_sequence('cam_xuc', 'id'), COALESCE(MAX(id), 1)) FROM cam_xuc;
-SELECT setval(pg_get_serial_sequence('su_kien', 'id'), COALESCE(MAX(id), 1)) FROM su_kien;
-SELECT setval(pg_get_serial_sequence('thong_bao', 'id'), COALESCE(MAX(id), 1)) FROM thong_bao;
-SELECT setval(pg_get_serial_sequence('phien_chon_truong_ho', 'id'), COALESCE(MAX(id), 1)) FROM phien_chon_truong_ho;
-SELECT setval(pg_get_serial_sequence('phieu_bau_truong_ho', 'id'), COALESCE(MAX(id), 1)) FROM phieu_bau_truong_ho;
-SELECT setval(pg_get_serial_sequence('quy', 'id'), COALESCE(MAX(id), 1)) FROM quy;
-SELECT setval(pg_get_serial_sequence('dot_dong_gop', 'id'), COALESCE(MAX(id), 1)) FROM dot_dong_gop;
-SELECT setval(pg_get_serial_sequence('yeu_cau_dong_gop', 'id'), COALESCE(MAX(id), 1)) FROM yeu_cau_dong_gop;
-SELECT setval(pg_get_serial_sequence('giao_dich_quy', 'id'), COALESCE(MAX(id), 1)) FROM giao_dich_quy;
-SELECT setval(pg_get_serial_sequence('chung_tu', 'id'), COALESCE(MAX(id), 1)) FROM chung_tu;
+-- DỮ LIỆU MẪU (SEED DATA) ĐÃ ĐƯỢC TÁCH RA FILE db/seed_dev.sql
 
 COMMIT;
 
