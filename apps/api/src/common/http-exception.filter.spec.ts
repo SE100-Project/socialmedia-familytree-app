@@ -35,6 +35,7 @@ describe('HttpExceptionFilter (NFR-08)', () => {
       expect.objectContaining({
         statusCode: HttpStatus.BAD_REQUEST,
         error: 'Bad Request',
+        code: 'Bad Request',
         message: 'Dữ liệu không hợp lệ',
         path: '/api/test',
       }),

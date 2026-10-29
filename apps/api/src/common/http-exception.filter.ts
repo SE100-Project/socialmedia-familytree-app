@@ -11,6 +11,7 @@ import { Request, Response } from 'express';
 export interface StandardErrorResponse {
   statusCode: number;
   error: string;
+  code?: string;
   message: string | string[];
   timestamp: string;
   path: string;
@@ -55,6 +56,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const payload: StandardErrorResponse = {
       statusCode,
       error,
+      code: error,
       message,
       timestamp: new Date().toISOString(),
       path: request.url,
