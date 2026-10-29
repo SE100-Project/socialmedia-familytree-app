@@ -41,9 +41,19 @@ export class AuthController {
   @Get('me')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Lấy thông tin tài khoản và vai trò đang đăng nhập' })
+  @ApiOperation({ summary: 'Lấy thông tin tài khoản và vai trò đang đăng nhập (hợp đồng FE-1)' })
   me(@CurrentUser() user: AuthUser) {
-    return user;
+    return {
+      id: user.id,
+      accountCode: user.accountCode,
+      phone: user.phone,
+      email: user.email,
+      status: user.status,
+      profileId: user.profileId,
+      clanId: user.clanId,
+      profileLinks: user.profileLinks,
+      roles: user.roles,
+    };
   }
 
   @Post('change-password')
