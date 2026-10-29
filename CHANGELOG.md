@@ -63,14 +63,14 @@ Tất cả các thay đổi quan trọng của dự án Hệ thống Mạng xã 
 * **Audit Trail tập trung (AuditService - FR-46)**:
   * Phương thức log({ actorId, action, entityType, entityId, before, after, tx }).
   * Đảm bảo nguyên tắc không bao giờ ném ngoại lệ làm gián đoạn luồng nghiệp vụ.
-  * Hỗ trợ Prisma transaction client (	x) để cùng commit trong một giao dịch nguyên tử (NFR-07).
+  * Hỗ trợ Prisma transaction client (tx) để cùng commit trong một giao dịch nguyên tử (NFR-07).
 * **Bộ lọc ngoại lệ toàn cục (HttpExceptionFilter - NFR-08)**:
   * Chuẩn hóa mọi phản hồi lỗi về định dạng JSON nhất quán { statusCode, error, message, timestamp, path }.
   * Phục vụ trực tiếp cho frontend kit pi.ts.
 * **Chuẩn phân trang Cursor (CursorPaginationDto & PaginatedResult<T>)**:
   * Định dạng { items, nextCursor } và tài liệu hướng dẫn quy ước tại docs/api-conventions.md.
 * **Hoàn thiện hợp đồng GET /auth/me & Bảo vệ Brute-force (B1-05)**:
-  * Bổ sung clanId, ccountCode, phone, email, status, profileLinks, 
+  * Bổ sung clanId, accountCode, phone, email, status, profileLinks, 
 oles vào response của /auth/me.
   * Giới hạn tần suất đăng nhập (Rate Limiting / Brute-force protection): Tự động chặn và trả HTTP 429 (Too Many Requests) sau 5 lần thử sai liên tiếp trong 15 phút.
   * Kiểm tra tài khoản bị khóa (status = LOCKED): Ngăn chặn đăng nhập và trả thông báo rõ ràng; đồng thời JwtAuthGuard từ chối token ngay lập tức ở request kế tiếp khi tài khoản bị khóa giữa chừng (NFR-02).
@@ -90,7 +90,7 @@ oles vào response của /auth/me.
   * Lấy danh sách hàng đợi yêu cầu theo phạm vi: Trưởng họ xem toàn bộ dòng họ, Trưởng chi chỉ xem chi nhánh được phân công (NFR-01). Khách và thành viên thường bị chặn 403 Forbidden.
   * Người gửi yêu cầu có thể tự hủy yêu cầu của mình khi còn ở trạng thái PENDING (FR-52).
   * Từ chối yêu cầu gia nhập bắt buộc phải có lý do từ chối (BR-12 / UC-05).
-  * Quy tắc BR-12: Người duyệt bắt buộc phải khác người tạo yêu cầu (pproverId !== requesterId).
+  * Quy tắc BR-12: Người duyệt bắt buộc phải khác người tạo yêu cầu (approverId !== requesterId).
   * Chống xung đột đồng thời (Race condition / Concurrency): Cơ chế cập nhật có điều kiện status = PENDING trong database transaction đảm bảo nếu đồng thời hủy và duyệt thì chỉ duy nhất một bên thành công.
 * **Phê duyệt & Liên kết hồ sơ phả hệ (POST /api/join-requests/:id/approve - UC-05 / B1-08)**:
   * Hỗ trợ liên kết với hồ sơ có sẵn chưa có chủ hoặc tự động tạo hồ sơ mới khi người dùng chưa có trên cây.
