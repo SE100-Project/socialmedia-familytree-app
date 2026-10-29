@@ -78,3 +78,22 @@ oles vào response của /auth/me.
   * Thiết lập GitHub Actions CI (.github/workflows/ci.yml), CODEOWNERS phân công theo bảng trách nhiệm nhóm, và mẫu Pull Request (pull_request_template.md).
 * **Hồ sơ Thiết kế OOAD (Biểu mẫu OOAD_Nhóm 7.xlsx)**:
   * Cập nhật sheet P3D_01_CRC_ThietKeLop với toàn bộ 22 lớp thực thể (CL-01 đến CL-22) từ hồ sơ phân tích phả hệ.
+
+### 5. Quản lý Yêu cầu Gia nhập & Liên kết Hồ sơ Phả hệ (Tasks BE-1: B1-06, B1-07, B1-08)
+* **Gửi yêu cầu xin gia nhập (POST /api/join-requests - UC-04 / B1-06)**:
+  * Hỗ trợ 2 phương thức: theo mã gia phả (BY_CLAN_CODE) hoặc theo mã tài khoản người thân (BY_ACCOUNT_CODE).
+  * Phân biệt rõ thông báo lỗi giữa mã gia phả và mã tài khoản người thân không tồn tại.
+  * Chặn yêu cầu gia nhập của tài khoản đã liên kết trong dòng họ hoặc tự nhập mã tài khoản của chính mình.
+  * Chặn yêu cầu trùng lặp khi người dùng đang có một yêu cầu ở trạng thái Chờ duyệt (PENDING).
+  * Tự động định tuyến người duyệt theo quy tắc nghiệp vụ BR-02: Chi chưa có Trưởng chi thì tự động chuyển tiếp lên Trưởng họ.
+* **Quản lý hàng đợi & Xử lý yêu cầu (GET /api/join-requests, POST /api/join-requests/:id/reject, POST /api/join-requests/:id/cancel - UC-05, FR-52 / B1-07)**:
+  * Lấy danh sách hàng đợi yêu cầu theo phạm vi: Trưởng họ xem toàn bộ dòng họ, Trưởng chi chỉ xem chi nhánh được phân công (NFR-01). Khách và thành viên thường bị chặn 403 Forbidden.
+  * Người gửi yêu cầu có thể tự hủy yêu cầu của mình khi còn ở trạng thái PENDING (FR-52).
+  * Từ chối yêu cầu gia nhập bắt buộc phải có lý do từ chối (BR-12 / UC-05).
+  * Quy tắc BR-12: Người duyệt bắt buộc phải khác người tạo yêu cầu (pproverId !== requesterId).
+  * Chống xung đột đồng thời (Race condition / Concurrency): Cơ chế cập nhật có điều kiện status = PENDING trong database transaction đảm bảo nếu đồng thời hủy và duyệt thì chỉ duy nhất một bên thành công.
+* **Phê duyệt & Liên kết hồ sơ phả hệ (POST /api/join-requests/:id/approve - UC-05 / B1-08)**:
+  * Hỗ trợ liên kết với hồ sơ có sẵn chưa có chủ hoặc tự động tạo hồ sơ mới khi người dùng chưa có trên cây.
+  * Kiểm tra xung đột liên kết BR-05 (1 tài khoản chỉ gắn 1 hồ sơ trong họ, 1 hồ sơ chỉ thuộc 1 tài khoản).
+  * Thực hiện toàn vẹn trong một giao dịch cơ sở dữ liệu (prisma.): Cập nhật trạng thái APPROVED, tạo ApprovalDecision, cập nhật MemberProfile.accountId, tạo bản ghi bảng nối AccountProfileLink (CSDL v1.2 §3.5), và ghi nhật ký kiểm toán qua AuditService (FR-46).
+  * Sau khi duyệt thành công, endpoint GET /api/auth/me của người dùng phản ánh ngay lập tức profileId, clanId và profileLinks.
