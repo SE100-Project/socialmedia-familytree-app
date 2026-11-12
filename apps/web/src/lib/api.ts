@@ -6,6 +6,8 @@ try {
   /* sessionStorage có thể bị chặn */
 }
 
+const authListeners = new Set<() => void>();
+
 export function setToken(t: string | null) {
   token = t;
   try {
@@ -14,6 +16,12 @@ export function setToken(t: string | null) {
   } catch {
     /* bỏ qua */
   }
+  authListeners.forEach((listener) => listener());
+}
+
+export function onAuthChange(listener: () => void) {
+  authListeners.add(listener);
+  return () => authListeners.delete(listener);
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -25,6 +33,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...init.headers,
     },
   });
+  if (res.status === 401) setToken(null);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.message ?? `Lỗi ${res.status}`);
