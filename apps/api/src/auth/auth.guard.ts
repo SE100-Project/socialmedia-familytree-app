@@ -1,11 +1,13 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { RoleType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface AuthUser {
   id: string;
   profileId: string | null;
-  roles: { type: 'CLAN_HEAD' | 'BRANCH_HEAD' | 'TECH_SUPPORT'; clanId: string; branchId: string | null }[];
+  profileLinks: { clanId: string; profileId: string }[];
+  roles: { type: RoleType; clanId: string; branchId: string | null }[];
 }
 
 /**
@@ -33,13 +35,18 @@ export class JwtAuthGuard implements CanActivate {
       where: { id: sub },
       include: {
         profile: { select: { id: true } },
+        accountProfileLinks: { select: { clanId: true, profileId: true } },
         roles: { where: { OR: [{ validTo: null }, { validTo: { gt: new Date() } }] } },
       },
     });
     if (!acc || acc.status !== 'ACTIVE') throw new UnauthorizedException();
+
+    const primaryProfileId = acc.profile?.id ?? acc.accountProfileLinks[0]?.profileId ?? null;
+
     const user: AuthUser = {
       id: acc.id,
-      profileId: acc.profile?.id ?? null,
+      profileId: primaryProfileId,
+      profileLinks: acc.accountProfileLinks.map((l) => ({ clanId: l.clanId, profileId: l.profileId })),
       roles: acc.roles.map((r) => ({ type: r.type, clanId: r.clanId, branchId: r.branchId })),
     };
     req.user = user;
