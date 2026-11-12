@@ -121,6 +121,14 @@ describe('PolicyService - Ma trận Phân quyền (NFR-01 / FR-03)', () => {
       // Trưởng chi Chi 1 KHÔNG kiểm duyệt được bài thuộc Chi 2
       expect(service.canModeratePost(branchHeadUser, clanA, branch2, authorId)).toBe(false);
     });
+
+    it('canManageClan & assertMember theo đúng đặc tả thẻ CRC', () => {
+      expect(service.canManageClan(clanHeadUser, clanA)).toBe(true);
+      expect(service.canManageClan(branchHeadUser, clanA)).toBe(false);
+
+      expect(() => service.assertMember(memberUser, clanA)).not.toThrow();
+      expect(() => service.assertMember(unlinkedUser, clanA)).toThrow(ForbiddenException);
+    });
   });
 });
 

@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, JwtService } from '@nestjs/jwt';
+import { HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './auth.guard';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { generateTotpCode } from '../common/totp';
@@ -9,6 +11,7 @@ import { generateTotpCode } from '../common/totp';
 describe('AuthService Integration Test', () => {
   let service: AuthService;
   let prisma: PrismaService;
+  let jwt: JwtService;
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -28,7 +31,10 @@ describe('AuthService Integration Test', () => {
 
     service = module.get<AuthService>(AuthService);
     prisma = module.get<PrismaService>(PrismaService);
+    jwt = module.get<JwtService>(JwtService);
   });
+
+  const lockedPhone = '0966554433';
 
   const testPhone = '0988776655';
   const testEmail = 'authtest@giapha.vn';
@@ -42,7 +48,7 @@ describe('AuthService Integration Test', () => {
 
   afterAll(async () => {
     // Cleanup test data
-    const phones = [testPhone, googlePhone];
+    const phones = [testPhone, googlePhone, lockedPhone];
     for (const p of phones) {
       const acc = await prisma.account.findUnique({ where: { phone: p } });
       if (acc) {
@@ -186,5 +192,89 @@ describe('AuthService Integration Test', () => {
       idToken: mockGoogleToken,
     });
     expect('accessToken' in reLogin).toBe(true);
+  });
+
+  it('B1-05: Chặn đăng nhập khi tài khoản bị khóa (status = LOCKED)', async () => {
+    // Đăng ký tài khoản thử nghiệm
+    await service.register({
+      phone: lockedPhone,
+      password: testPass,
+    });
+    await prisma.account.update({
+      where: { phone: lockedPhone },
+      data: { status: 'LOCKED' },
+    });
+
+    await expect(
+      service.login({
+        identifier: lockedPhone,
+        password: testPass,
+      }),
+    ).rejects.toThrow(new UnauthorizedException('Tài khoản đã bị khóa'));
+  });
+
+  it('NFR-02 / B1-05: Giới hạn tần suất đăng nhập (HTTP 429 sau 5 lần nhập sai)', async () => {
+    const brutePhone = '0911223344';
+    service.resetLoginRateLimit(brutePhone);
+
+    // Thử sai 5 lần
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        service.login({
+          identifier: brutePhone,
+          password: 'WrongPassword123',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    }
+
+    // Lần thứ 6 bị chặn với mã HTTP 429 TOO_MANY_REQUESTS
+    try {
+      await service.login({
+        identifier: brutePhone,
+        password: 'WrongPassword123',
+      });
+      throw new Error('Mong đợi ngoại lệ HTTP 429 nhưng hàm không ném lỗi');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpException);
+      expect((err as HttpException).getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    service.resetLoginRateLimit(brutePhone);
+  });
+
+  it('B1-05 / NFR-02: JwtAuthGuard từ chối truy cập ngay lập tức nếu tài khoản bị khóa', async () => {
+    const guard = new JwtAuthGuard(jwt, prisma);
+
+    const acc = await prisma.account.findUniqueOrThrow({ where: { phone: testPhone } });
+    const token = await jwt.signAsync({ sub: acc.id });
+
+    const mockCtx = (authToken: string) =>
+      ({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            headers: { authorization: `Bearer ${authToken}` },
+          }),
+        }),
+      }) as any;
+
+    // Khi tài khoản ACTIVE -> Guard cho phép
+    await expect(guard.canActivate(mockCtx(token))).resolves.toBe(true);
+
+    // Khóa tài khoản
+    await prisma.account.update({
+      where: { id: acc.id },
+      data: { status: 'LOCKED' },
+    });
+
+    // Guard từ chối ngay lập tức
+    await expect(guard.canActivate(mockCtx(token))).rejects.toThrow(
+      new UnauthorizedException('Tài khoản đã bị khóa hoặc không tồn tại'),
+    );
+
+    // Phục hồi tài khoản ACTIVE cho các luồng khác
+    await prisma.account.update({
+      where: { id: acc.id },
+      data: { status: 'ACTIVE' },
+    });
   });
 });

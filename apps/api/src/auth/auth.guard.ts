@@ -5,7 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export interface AuthUser {
   id: string;
+  accountCode?: string;
+  phone?: string;
+  email?: string | null;
+  status?: string;
   profileId: string | null;
+  clanId?: string | null;
   profileLinks: { clanId: string; profileId: string }[];
   roles: { type: RoleType; clanId: string; branchId: string | null }[];
 }
@@ -39,13 +44,22 @@ export class JwtAuthGuard implements CanActivate {
         roles: { where: { OR: [{ validTo: null }, { validTo: { gt: new Date() } }] } },
       },
     });
-    if (!acc || acc.status !== 'ACTIVE') throw new UnauthorizedException();
+    if (!acc || acc.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Tài khoản đã bị khóa hoặc không tồn tại');
+    }
 
-    const primaryProfileId = acc.profile?.id ?? acc.accountProfileLinks[0]?.profileId ?? null;
+    const primaryLink = acc.accountProfileLinks[0];
+    const primaryProfileId = acc.profile?.id ?? primaryLink?.profileId ?? null;
+    const primaryClanId = primaryLink?.clanId ?? acc.roles[0]?.clanId ?? null;
 
     const user: AuthUser = {
       id: acc.id,
+      accountCode: acc.accountCode,
+      phone: acc.phone,
+      email: acc.email,
+      status: acc.status,
       profileId: primaryProfileId,
+      clanId: primaryClanId,
       profileLinks: acc.accountProfileLinks.map((l) => ({ clanId: l.clanId, profileId: l.profileId })),
       roles: acc.roles.map((r) => ({ type: r.type, clanId: r.clanId, branchId: r.branchId })),
     };

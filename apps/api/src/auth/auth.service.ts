@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -67,6 +69,40 @@ export class AuthService {
     throw new ConflictException('Không tạo được mã tài khoản, thử lại');
   }
 
+  private readonly loginAttempts = new Map<string, { attempts: number; blockedUntil?: number }>();
+
+  checkLoginRateLimit(identifierKey: string) {
+    const record = this.loginAttempts.get(identifierKey);
+    if (!record) return;
+
+    const now = Date.now();
+    if (record.blockedUntil && record.blockedUntil > now) {
+      const remainingMinutes = Math.ceil((record.blockedUntil - now) / 60000);
+      throw new HttpException(
+        `Bạn đã nhập sai mật khẩu quá 5 lần. Vui lòng thử lại sau ${remainingMinutes} phút.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    if (record.blockedUntil && record.blockedUntil <= now) {
+      this.loginAttempts.delete(identifierKey);
+    }
+  }
+
+  recordLoginFailure(identifierKey: string) {
+    const now = Date.now();
+    const record = this.loginAttempts.get(identifierKey) ?? { attempts: 0 };
+    record.attempts += 1;
+    if (record.attempts >= 5) {
+      record.blockedUntil = now + 15 * 60 * 1000;
+    }
+    this.loginAttempts.set(identifierKey, record);
+  }
+
+  resetLoginRateLimit(identifierKey: string) {
+    this.loginAttempts.delete(identifierKey);
+  }
+
   /** UC-02. Đăng nhập bằng Số điện thoại hoặc Email (CSDL v1.2 §6.2) */
   async login(dto: LoginDto) {
     const rawIdentifier = (dto.identifier ?? dto.phone ?? '').trim();
@@ -74,6 +110,7 @@ export class AuthService {
       throw new BadRequestException('Vui lòng nhập số điện thoại hoặc email');
     }
 
+    let normalizedKey = rawIdentifier.toLowerCase();
     let acc: Account | null = null;
     if (rawIdentifier.includes('@')) {
       acc = await this.prisma.account.findUnique({
@@ -82,20 +119,34 @@ export class AuthService {
     } else {
       const phone = normalizeVnPhone(rawIdentifier);
       if (phone) {
+        normalizedKey = phone;
         acc = await this.prisma.account.findUnique({ where: { phone } });
       }
     }
 
-    const ok =
+    // NFR-02 / B1-05: Giới hạn tần suất đăng nhập (Rate Limiting / Brute-force protection)
+    this.checkLoginRateLimit(normalizedKey);
+
+    const isPasswordValid =
       acc &&
-      acc.status === 'ACTIVE' &&
       acc.authType === 'LOCAL' &&
       !!acc.passwordHash &&
       (await verify(acc.passwordHash, dto.password));
 
-    if (!acc || !ok) {
+    if (!acc || !isPasswordValid) {
+      this.recordLoginFailure(normalizedKey);
       throw new UnauthorizedException('Sai số điện thoại/email hoặc mật khẩu');
     }
+
+    if (acc.status === 'LOCKED') {
+      throw new UnauthorizedException('Tài khoản đã bị khóa');
+    }
+    if (acc.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Tài khoản không ở trạng thái hoạt động');
+    }
+
+    // Đăng nhập thành công -> xóa bỏ đếm lỗi
+    this.resetLoginRateLimit(normalizedKey);
 
     return {
       accessToken: await this.jwt.signAsync({ sub: acc.id }),

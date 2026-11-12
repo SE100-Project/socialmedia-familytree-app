@@ -14,6 +14,13 @@ export class PolicyService {
   }
 
   /**
+   * Kiểm tra quyền quản lý toàn dòng họ (thẻ CRC PolicyService: canManageClan).
+   */
+  canManageClan(user: AuthUser, clanId?: string): boolean {
+    return this.isClanHead(user, clanId);
+  }
+
+  /**
    * Kiểm tra người dùng có vai trò Trưởng chi của đúng chi nhánh được chỉ định hay không.
    */
   isBranchHead(user: AuthUser, branchId: string): boolean {
@@ -141,6 +148,13 @@ export class PolicyService {
         'Tài khoản chưa được liên kết với hồ sơ thành viên trong dòng họ để truy cập nội dung này',
       );
     }
+  }
+
+  /**
+   * Alias theo thẻ CRC PolicyService: assertMember.
+   */
+  assertMember(user: AuthUser, clanId?: string): void {
+    this.assertLinkedMember(user, clanId);
   }
 }
 

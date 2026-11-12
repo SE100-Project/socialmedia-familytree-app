@@ -1,0 +1,27 @@
+# Quy ước phân quyền review code (CODEOWNERS) theo phân công nhóm 7
+# Format: <path> <github-usernames-or-roles>
+
+# 1. Cơ sở hạ tầng & CSDL
+/apps/api/prisma/                        @huynhlongbaokhanh @dangdangkhoa
+/.github/                                @huynhlongbaokhanh
+
+# 2. Module Backend nền tảng (BE-1: Huỳnh Long Bảo Khanh)
+/apps/api/src/auth/                      @huynhlongbaokhanh
+/apps/api/src/audit/                     @huynhlongbaokhanh
+/apps/api/src/common/                    @huynhlongbaokhanh
+
+# 3. Phả hệ & Ghi dữ liệu (BE-2: Đặng Đăng Khoa)
+/apps/api/src/genealogy/                 @dangdangkhoa
+
+# 4. Cây gia phả & Đọc/Báo cáo (BE-3: Hà Khải Vinh)
+/apps/api/src/tree/                      @hakhaivinh
+/apps/api/src/reports/                   @hakhaivinh
+
+# 5. Frontend chung, Khung & Auth (FE-1: Huỳnh Gia Khang)
+/apps/web/src/components/                @huynhgiakhang
+/apps/web/src/pages/LoginPage.tsx        @huynhgiakhang
+/apps/web/src/pages/RegisterPage.tsx     @huynhgiakhang
+
+# 6. Mạng xã hội, Quỹ & Sự kiện (FE-2: Lương Phúc Khang)
+/apps/web/src/pages/feed/                @luongphuckhang
+/apps/web/src/pages/funds/               @luongphuckhang

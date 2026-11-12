@@ -58,3 +58,23 @@ Tất cả các thay đổi quan trọng của dự án Hệ thống Mạng xã 
   * `auth.service.spec.ts` (7 tests)
 * Biên dịch TypeScript `tsc --noEmit` thành công không cảnh báo.
 
+
+### 4. Cơ sở hạ tầng Backend & Tiêu chuẩn API (Tasks BE-1: B1-00 -> B1-05)
+* **Audit Trail tập trung (AuditService - FR-46)**:
+  * Phương thức log({ actorId, action, entityType, entityId, before, after, tx }).
+  * Đảm bảo nguyên tắc không bao giờ ném ngoại lệ làm gián đoạn luồng nghiệp vụ.
+  * Hỗ trợ Prisma transaction client (	x) để cùng commit trong một giao dịch nguyên tử (NFR-07).
+* **Bộ lọc ngoại lệ toàn cục (HttpExceptionFilter - NFR-08)**:
+  * Chuẩn hóa mọi phản hồi lỗi về định dạng JSON nhất quán { statusCode, error, message, timestamp, path }.
+  * Phục vụ trực tiếp cho frontend kit pi.ts.
+* **Chuẩn phân trang Cursor (CursorPaginationDto & PaginatedResult<T>)**:
+  * Định dạng { items, nextCursor } và tài liệu hướng dẫn quy ước tại docs/api-conventions.md.
+* **Hoàn thiện hợp đồng GET /auth/me & Bảo vệ Brute-force (B1-05)**:
+  * Bổ sung clanId, ccountCode, phone, email, status, profileLinks, 
+oles vào response của /auth/me.
+  * Giới hạn tần suất đăng nhập (Rate Limiting / Brute-force protection): Tự động chặn và trả HTTP 429 (Too Many Requests) sau 5 lần thử sai liên tiếp trong 15 phút.
+  * Kiểm tra tài khoản bị khóa (status = LOCKED): Ngăn chặn đăng nhập và trả thông báo rõ ràng; đồng thời JwtAuthGuard từ chối token ngay lập tức ở request kế tiếp khi tài khoản bị khóa giữa chừng (NFR-02).
+* **Quy trình & CI/CD (.github)**:
+  * Thiết lập GitHub Actions CI (.github/workflows/ci.yml), CODEOWNERS phân công theo bảng trách nhiệm nhóm, và mẫu Pull Request (pull_request_template.md).
+* **Hồ sơ Thiết kế OOAD (Biểu mẫu OOAD_Nhóm 7.xlsx)**:
+  * Cập nhật sheet P3D_01_CRC_ThietKeLop với toàn bộ 22 lớp thực thể (CL-01 đến CL-22) từ hồ sơ phân tích phả hệ.
