@@ -25,6 +25,15 @@ export function onAuthChange(listener: () => void) {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (import.meta.env.VITE_USE_MOCK === 'true') {
+    try {
+      const { mockApi } = await import('../mocks/handlers');
+      return await mockApi<T>(path);
+    } catch (error) {
+      if ((error as { status?: number }).status === 401) setToken(null);
+      throw error;
+    }
+  }
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
