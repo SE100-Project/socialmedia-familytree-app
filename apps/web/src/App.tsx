@@ -3,6 +3,7 @@ import { useMe, MeProvider } from './lib/me';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { HomePage } from './pages/HomePage';
+import { UiKitPreviewPage } from './pages/UiKitPreviewPage';
 
 function AppShell() {
   const { user } = useMe();
@@ -22,6 +23,7 @@ export function App() {
   return <MeProvider><Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/register" element={<RegisterPage />} />
+    <Route path="/ui-kit" element={<UiKitPreviewPage />} />
     <Route element={<Guard />}><Route path="/" element={<HomePage />} /></Route>
   </Routes></MeProvider>;
 }
