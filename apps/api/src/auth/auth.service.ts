@@ -54,7 +54,12 @@ export class AuthService {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const acc = await this.prisma.account.create({
-          data: { phone, email: dto.email ?? null, passwordHash, accountCode: generateAccountCode() },
+          data: {
+            phone,
+            email: dto.email ? dto.email.trim().toLowerCase() : null,
+            passwordHash,
+            accountCode: generateAccountCode(),
+          },
         });
         return { id: acc.id, accountCode: acc.accountCode, phone: acc.phone };
       } catch (e) {

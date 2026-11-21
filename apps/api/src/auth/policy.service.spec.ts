@@ -43,6 +43,14 @@ describe('PolicyService - Ma trận Phân quyền (NFR-01 / FR-03)', () => {
     roles: [],
   };
 
+  // 5. Kỹ thuật viên hệ thống (TECH_SUPPORT) - không có hồ sơ, không có quyền dữ liệu nghiệp vụ
+  const techSupportUser: AuthUser = {
+    id: 'user-tech-support',
+    profileId: null,
+    profileLinks: [],
+    roles: [{ type: RoleType.TECH_SUPPORT, clanId: clanA, branchId: null }],
+  };
+
   describe('Kiểm tra quyền Trưởng họ (CLAN_HEAD)', () => {
     it('Trưởng họ quản lý được toàn họ và mọi chi nhánh trong dòng họ mình', () => {
       expect(service.isClanHead(clanHeadUser, clanA)).toBe(true);
@@ -76,9 +84,9 @@ describe('PolicyService - Ma trận Phân quyền (NFR-01 / FR-03)', () => {
     });
 
     it('Trưởng chi ném ngoại lệ khi can thiệp sai phạm vi', () => {
-      expect(() =>
-        service.assertCanManageMember(branchHeadUser, clanA, branch2),
-      ).toThrow(ForbiddenException);
+      expect(() => service.assertCanManageMember(branchHeadUser, clanA, branch2)).toThrow(
+        ForbiddenException,
+      );
     });
   });
 
@@ -130,5 +138,21 @@ describe('PolicyService - Ma trận Phân quyền (NFR-01 / FR-03)', () => {
       expect(() => service.assertMember(unlinkedUser, clanA)).toThrow(ForbiddenException);
     });
   });
-});
 
+  describe('Kiểm tra Kỹ thuật viên (TECH_SUPPORT - NFR-01)', () => {
+    it('Kỹ thuật viên không có quyền truy cập hoặc quản lý dữ liệu nghiệp vụ dòng họ', () => {
+      expect(service.isTechSupport(techSupportUser)).toBe(true);
+      expect(service.isClanHead(techSupportUser, clanA)).toBe(false);
+      expect(service.canManageClan(techSupportUser, clanA)).toBe(false);
+      expect(service.canManageBranch(techSupportUser, clanA, branch1)).toBe(false);
+      expect(service.canManageMember(techSupportUser, clanA, branch1)).toBe(false);
+      expect(service.canManageFund(techSupportUser, clanA, null)).toBe(false);
+      expect(service.isLinkedMember(techSupportUser, clanA)).toBe(false);
+
+      expect(() => service.assertMember(techSupportUser, clanA)).toThrow(ForbiddenException);
+      expect(() => service.assertCanManageBranch(techSupportUser, clanA, branch1)).toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+});

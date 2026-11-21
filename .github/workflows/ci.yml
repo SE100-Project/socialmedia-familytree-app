@@ -1,0 +1,73 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test-and-verify:
+    name: Build, Typecheck & Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: giapha
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm --filter api exec prisma generate
+
+      - name: Deploy Prisma Migrations
+        env:
+          DATABASE_URL: postgresql://root:root@localhost:5432/giapha?schema=public
+        run: pnpm --filter api exec prisma migrate deploy
+
+      - name: Seed Database
+        env:
+          DATABASE_URL: postgresql://root:root@localhost:5432/giapha?schema=public
+          JWT_ACCESS_SECRET: ci-test-secret-change-me
+        run: pnpm --filter api exec prisma db seed
+
+      - name: Typecheck Backend
+        run: pnpm --filter api typecheck
+
+      - name: Run Backend Tests
+        env:
+          DATABASE_URL: postgresql://root:root@localhost:5432/giapha?schema=public
+          JWT_ACCESS_SECRET: ci-test-secret-change-me
+        run: pnpm --filter api test
+
+      - name: Typecheck Frontend
+        run: pnpm --filter web typecheck
+
+      - name: Run Frontend Tests
+        run: pnpm --filter web test
