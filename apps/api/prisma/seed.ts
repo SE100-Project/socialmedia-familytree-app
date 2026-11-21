@@ -1,4 +1,17 @@
-import { PrismaClient, Gender, MemberStatus, CalendarType, RelationType, RoleType, AuthType, AccountStatus, ContentStatus, FundScope } from '@prisma/client';
+import prismaPkg from '@prisma/client';
+
+const {
+  PrismaClient,
+  Gender,
+  MemberStatus,
+  CalendarType,
+  RelationType,
+  RoleType,
+  AuthType,
+  AccountStatus,
+  ContentStatus,
+  FundScope,
+} = prismaPkg;
 import { hash } from '@node-rs/argon2';
 import { encryptTotpSecret } from '../src/common/totp.ts';
 
