@@ -13,9 +13,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser, JwtAuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { CursorPaginationDto } from '../common/pagination.dto';
+import { BranchService } from './branch.service';
+import { ClanService } from './clan.service';
 import {
   CreateBranchDto,
   CreateClanDto,
@@ -27,15 +29,15 @@ import {
   UpdateBranchDto,
   UpdateProfileDto,
 } from './dto';
-import { GenealogyService } from './genealogy.service';
 import { ProfileService } from './profile.service';
+import { RelationshipService } from './relationship.service';
 
 @ApiTags('Clans (UC-07)')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('clans')
 export class ClansController {
-  constructor(private readonly genealogyService: GenealogyService) {}
+  constructor(private readonly clanService: ClanService) {}
 
   @Post()
   @ApiOperation({ summary: 'Khởi tạo dòng họ đầu tiên (chỉ khi hệ thống còn trống)' })
@@ -45,13 +47,13 @@ export class ClansController {
   })
   @ApiResponse({ status: 409, description: 'Hệ thống đã có dòng họ hoặc tài khoản đã liên kết' })
   createClan(@CurrentUser() user: AuthUser, @Body() dto: CreateClanDto) {
-    return this.genealogyService.createClan(user, dto);
+    return this.clanService.createClan(user, dto);
   }
 
   @Get('current')
   @ApiOperation({ summary: 'Lấy thông tin dòng họ của thành viên hiện tại' })
   getCurrentClan(@CurrentUser() user: AuthUser) {
-    return this.genealogyService.getCurrentClan(user);
+    return this.clanService.getCurrentClan(user);
   }
 }
 
@@ -60,12 +62,12 @@ export class ClansController {
 @UseGuards(JwtAuthGuard)
 @Controller('branches')
 export class BranchesController {
-  constructor(private readonly genealogyService: GenealogyService) {}
+  constructor(private readonly branchService: BranchService) {}
 
   @Get()
   @ApiOperation({ summary: 'Danh sách chi trong dòng họ (có phân trang con trỏ)' })
   listBranches(@CurrentUser() user: AuthUser, @Query() query: CursorPaginationDto) {
-    return this.genealogyService.listBranches(user, query);
+    return this.branchService.listBranches(user, query);
   }
 
   @Post()
@@ -73,7 +75,7 @@ export class BranchesController {
   @ApiResponse({ status: 403, description: 'Không phải Trưởng họ' })
   @ApiResponse({ status: 409, description: 'Tên chi đã tồn tại trong dòng họ' })
   createBranch(@CurrentUser() user: AuthUser, @Body() dto: CreateBranchDto) {
-    return this.genealogyService.createBranch(user, dto);
+    return this.branchService.createBranch(user, dto);
   }
 
   @Patch(':id')
@@ -84,7 +86,7 @@ export class BranchesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateBranchDto,
   ) {
-    return this.genealogyService.updateBranch(user, id, dto);
+    return this.branchService.updateBranch(user, id, dto);
   }
 }
 
@@ -145,12 +147,12 @@ export class ProfilesController {
 @UseGuards(JwtAuthGuard)
 @Controller('relationships')
 export class RelationshipsController {
-  constructor(private readonly genealogyService: GenealogyService) {}
+  constructor(private readonly relationshipService: RelationshipService) {}
 
   @Get()
   @ApiOperation({ summary: 'Danh sách quan hệ phả hệ trong dòng họ' })
   listRelationships(@CurrentUser() user: AuthUser, @Query() query: ListRelationshipsQueryDto) {
-    return this.genealogyService.listRelationships(user, query);
+    return this.relationshipService.listRelationships(user, query);
   }
 
   @Post()
@@ -158,6 +160,6 @@ export class RelationshipsController {
   @ApiResponse({ status: 400, description: 'Tự tham chiếu, khác dòng họ hoặc tạo vòng tổ tiên' })
   @ApiResponse({ status: 409, description: 'Quan hệ đã tồn tại' })
   createRelationship(@CurrentUser() user: AuthUser, @Body() dto: CreateRelationshipDto) {
-    return this.genealogyService.createRelationship(user, dto);
+    return this.relationshipService.createRelationship(user, dto);
   }
 }
