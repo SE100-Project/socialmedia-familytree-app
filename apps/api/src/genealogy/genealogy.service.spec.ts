@@ -29,8 +29,11 @@ import {
   SoftDeleteProfileQueryDto,
   UpdateBranchDto,
 } from './dto';
+import { BranchService } from './branch.service';
+import { ClanService } from './clan.service';
 import { GenealogyService } from './genealogy.service';
 import { ProfileService } from './profile.service';
+import { RelationshipService } from './relationship.service';
 import { StubTreeAncestorChecker, TreeAncestorChecker } from './tree-ancestor.port';
 
 interface InMemoryStore {
@@ -236,14 +239,23 @@ function makeGenealogyMockDb() {
       }),
       findFirst: jest.fn(async ({ where }: any) => {
         return (
-          store.roles.find(
-            (r) =>
+          store.roles.find((r) => {
+            const branchMatches =
+              where.branchId === undefined
+                ? true
+                : typeof where.branchId === 'object' &&
+                    where.branchId !== null &&
+                    'not' in where.branchId
+                  ? r.branchId !== null && r.branchId !== where.branchId.not
+                  : r.branchId === where.branchId;
+            return (
               r.clanId === where.clanId &&
-              r.branchId === where.branchId &&
+              branchMatches &&
               r.type === where.type &&
               r.accountId === where.accountId &&
-              (where.validTo === null ? r.validTo === null : true),
-          ) ?? null
+              (where.validTo === null ? r.validTo === null : true)
+            );
+          }) ?? null
         );
       }),
       findMany: jest.fn(async ({ where }: any) =>
@@ -402,6 +414,20 @@ function memberUser(
   };
 }
 
+function buildGenealogyFacade(
+  prisma: PrismaService,
+  policy: PolicyService,
+  audit: AuditService,
+  profileService: ProfileService,
+  ancestorChecker: TreeAncestorChecker,
+): GenealogyService {
+  return new GenealogyService(
+    new ClanService(prisma, policy, audit, profileService),
+    new BranchService(prisma, policy, audit),
+    new RelationshipService(prisma, policy, audit, ancestorChecker),
+  );
+}
+
 describe('GenealogyService (B2-01, B2-02, B2-04)', () => {
   let db: ReturnType<typeof makeGenealogyMockDb>;
   let service: GenealogyService;
@@ -418,7 +444,7 @@ describe('GenealogyService (B2-01, B2-02, B2-04)', () => {
       auditMock as unknown as AuditService,
     );
     const ancestorChecker = makeInMemoryAncestorChecker(db.getStore);
-    service = new GenealogyService(
+    service = buildGenealogyFacade(
       db.prisma as unknown as PrismaService,
       policy,
       auditMock as unknown as AuditService,
@@ -659,6 +685,14 @@ describe('GenealogyService (B2-01, B2-02, B2-04)', () => {
       expect(assigned.branchHead?.profileId).toBe(pUnbranched.id);
       expect(assigned.memberCount).toBe(1);
       expect(db.getStore().profiles.find((p) => p.id === pUnbranched.id)!.branchId).toBe(chi.id);
+
+      // Không thể bổ nhiệm cùng tài khoản đang làm Trưởng chi ở chi khác (cũng như khi chuyển chi khác)
+      const chiKhac = await service.createBranch(clanHead, { name: 'Chi Khác' });
+      // Giả lập pUnbranched chưa gắn chi (hoặc trường hợp kiểm tra role BRANCH_HEAD chi khác) -> vẫn bị chặn bởi headElsewhere
+      db.getStore().profiles.find((p) => p.id === pUnbranched.id)!.branchId = null;
+      await expect(
+        service.updateBranch(clanHead, chiKhac.id, { branchHeadProfileId: pUnbranched.id }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -763,6 +797,29 @@ describe('GenealogyService (B2-01, B2-02, B2-04)', () => {
           toId: nodeB.id,
         }),
       ).rejects.toThrow(ConflictException);
+
+      // 7. Chặn quan hệ mâu thuẫn: cha/mẹ - con hoặc tổ tiên - hậu duệ không thể thành vợ/chồng; vợ/chồng không thể thành cha - con
+      await expect(
+        service.createRelationship(clanHead, {
+          type: RelationType.SPOUSE,
+          fromId: nodeA.id,
+          toId: nodeB.id,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.createRelationship(clanHead, {
+          type: RelationType.SPOUSE,
+          fromId: nodeA.id,
+          toId: nodeC.id,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.createRelationship(clanHead, {
+          type: RelationType.PARENT_CHILD,
+          fromId: nodeB.id,
+          toId: spouseB.id,
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('chặn quan hệ khác dòng họ, hồ sơ REMOVED, và kiểm phạm vi chi với BRANCH_HEAD', async () => {
@@ -842,7 +899,7 @@ describe('GenealogyService (B2-01, B2-02, B2-04)', () => {
       const stub = new StubTreeAncestorChecker();
       expect(await stub.isAncestor('a', 'b')).toBe(false);
 
-      const serviceWithStub = new GenealogyService(
+      const serviceWithStub = buildGenealogyFacade(
         db.prisma as unknown as PrismaService,
         new PolicyService(),
         auditMock as unknown as AuditService,

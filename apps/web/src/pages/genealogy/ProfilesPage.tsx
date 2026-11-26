@@ -32,6 +32,7 @@ export function ProfilesPage() {
 
   const [search, setSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
+  const [generationFilter, setGenerationFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<MemberStatus | ''>('');
 
   const [modalMode, setModalMode] = useState<'create' | 'edit' | null>(null);
@@ -54,12 +55,13 @@ export function ProfilesPage() {
   });
 
   const profilesQuery = useQuery({
-    queryKey: ['profiles', { search, branchFilter, statusFilter }],
+    queryKey: ['profiles', { search, branchFilter, generationFilter, statusFilter }],
     queryFn: () =>
       genealogyApi.listProfiles({
         limit: 100,
         search: search || undefined,
         branchId: branchFilter || undefined,
+        generation: generationFilter ? Number(generationFilter) : undefined,
         status: statusFilter || undefined,
       }),
   });
@@ -192,6 +194,10 @@ export function ProfilesPage() {
       setFormError('Hồ sơ còn sống không được nhập ngày mất.');
       return;
     }
+    if (status === 'DECEASED' && birthDate && deathDate && deathDate < birthDate) {
+      setFormError('Ngày mất không được nhỏ hơn ngày sinh.');
+      return;
+    }
     if (modalMode === 'create') {
       createMutation.mutate();
     } else if (modalMode === 'edit') {
@@ -239,6 +245,17 @@ export function ProfilesPage() {
               </option>
             ))}
           </select>
+        </FormField>
+
+        <FormField label="Lọc theo đời">
+          <Input
+            type="number"
+            min={1}
+            max={50}
+            placeholder="Tất cả đời"
+            value={generationFilter}
+            onChange={(e) => setGenerationFilter(e.target.value)}
+          />
         </FormField>
 
         <FormField label="Trạng thái">
@@ -314,14 +331,17 @@ export function ProfilesPage() {
               render: (p) => {
                 const editable = p.status !== 'REMOVED' && canManageBranch(user, p.branchId);
                 if (!editable) return <span className="tree-node-meta">—</span>;
+                const canSoftDelete = !(clanHead && p.id === user?.profileId);
                 return (
                   <div className="row-wrap" style={{ gap: 6 }}>
                     <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>
                       Sửa
                     </Button>
-                    <Button size="sm" variant="danger" onClick={() => setDeletingProfile(p)}>
-                      Xóa mềm
-                    </Button>
+                    {canSoftDelete && (
+                      <Button size="sm" variant="danger" onClick={() => setDeletingProfile(p)}>
+                        Xóa mềm
+                      </Button>
+                    )}
                   </div>
                 );
               },

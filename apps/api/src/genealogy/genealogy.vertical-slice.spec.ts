@@ -194,7 +194,17 @@ function createVerticalSliceDb() {
           if (where?.clanId && p.clanId !== where.clanId) return false;
           if (where?.branchId !== undefined && p.branchId !== where.branchId) return false;
           if (where?.generation !== undefined && p.generation !== where.generation) return false;
-          if (where?.status !== undefined && p.status !== where.status) return false;
+          if (where?.status !== undefined) {
+            if (
+              typeof where.status === 'object' &&
+              where.status !== null &&
+              'not' in where.status
+            ) {
+              if (p.status === where.status.not) return false;
+            } else if (p.status !== where.status) {
+              return false;
+            }
+          }
           if (where?.accountId?.in && (!p.accountId || !where.accountId.in.includes(p.accountId))) {
             return false;
           }
@@ -268,14 +278,23 @@ function createVerticalSliceDb() {
       }),
       findFirst: jest.fn(async ({ where }: any) => {
         return (
-          store.roles.find(
-            (r) =>
+          store.roles.find((r) => {
+            const branchMatches =
+              where.branchId === undefined
+                ? true
+                : typeof where.branchId === 'object' &&
+                    where.branchId !== null &&
+                    'not' in where.branchId
+                  ? r.branchId !== null && r.branchId !== where.branchId.not
+                  : r.branchId === where.branchId;
+            return (
               r.clanId === where.clanId &&
-              (where.branchId === undefined || r.branchId === where.branchId) &&
+              branchMatches &&
               r.type === where.type &&
               r.accountId === where.accountId &&
-              (where.validTo === null ? r.validTo === null : true),
-          ) ?? null
+              (where.validTo === null ? r.validTo === null : true)
+            );
+          }) ?? null
         );
       }),
       findMany: jest.fn(async ({ where }: any) =>

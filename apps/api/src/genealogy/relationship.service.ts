@@ -72,43 +72,95 @@ export class RelationshipService {
       this.policy.assertCanManageMember(user, clanId, fromProfile.branchId);
       this.policy.assertCanManageMember(user, clanId, toProfile.branchId);
 
-      await this.assertNoDuplicateOrCycleInTx(tx, dto);
-
-      let created: Relationship;
-      try {
-        created = await tx.relationship.create({
-          data: {
-            type: dto.type,
-            fromId: dto.fromId,
-            toId: dto.toId,
-            startDate,
-            active: true,
-          },
-        });
-      } catch (err) {
-        if (isPrismaUniqueError(err)) {
-          throw new ConflictException('Quan hệ này đã tồn tại');
-        }
-        if (this.isAncestorCycleTriggerError(err)) {
-          throw new BadRequestException('Quan hệ tạo vòng lặp tổ tiên');
-        }
-        throw err;
-      }
-
-      await this.syncMissingGenerationsInTx(tx, dto.type, fromProfile, toProfile);
-
-      await this.audit.log({
+      return this.applyCreateRelationshipInTx(tx, {
+        clanId,
         actorId: user.id,
-        action: 'CREATE_RELATIONSHIP',
-        entityType: AUDIT_ENTITY_TYPES.RELATIONSHIP,
-        entityId: created.id,
-        before: null,
-        after: created,
-        tx,
+        dto,
+        startDate,
+        fromProfile,
+        toProfile,
       });
-
-      return created;
     });
+  }
+
+  /**
+   * Logic tạo quan hệ dùng chung trong transaction (sẵn sàng cho Giai đoạn 2 `UC-13` / `UC-05`).
+   */
+  async applyCreateRelationshipInTx(
+    tx: Prisma.TransactionClient,
+    params: {
+      clanId: string;
+      actorId: string;
+      dto: CreateRelationshipDto;
+      startDate?: Date | null;
+      fromProfile?: MemberProfile;
+      toProfile?: MemberProfile;
+    },
+  ): Promise<Relationship> {
+    const { clanId, actorId, dto } = params;
+    const startDate =
+      params.startDate !== undefined
+        ? params.startDate
+        : (parseOptionalDate(dto.startDate, 'Ngày bắt đầu') ?? null);
+
+    let fromProfile = params.fromProfile;
+    let toProfile = params.toProfile;
+    if (!fromProfile || !toProfile) {
+      const profiles = await tx.memberProfile.findMany({
+        where: { id: { in: [dto.fromId, dto.toId] } },
+      });
+      fromProfile = profiles.find((p) => p.id === dto.fromId);
+      toProfile = profiles.find((p) => p.id === dto.toId);
+      if (!fromProfile || !toProfile) {
+        throw new NotFoundException('Không tìm thấy hồ sơ thành viên được liên kết');
+      }
+      if (fromProfile.clanId !== clanId || toProfile.clanId !== clanId) {
+        throw new BadRequestException('Hai hồ sơ phải thuộc cùng một dòng họ');
+      }
+      if (
+        fromProfile.status === MemberStatus.REMOVED ||
+        toProfile.status === MemberStatus.REMOVED
+      ) {
+        throw new BadRequestException('Không thể thiết lập quan hệ cho hồ sơ đã xóa mềm');
+      }
+    }
+
+    await this.assertNoDuplicateOrCycleInTx(tx, dto);
+
+    let created: Relationship;
+    try {
+      created = await tx.relationship.create({
+        data: {
+          type: dto.type,
+          fromId: dto.fromId,
+          toId: dto.toId,
+          startDate,
+          active: true,
+        },
+      });
+    } catch (err) {
+      if (isPrismaUniqueError(err)) {
+        throw new ConflictException('Quan hệ này đã tồn tại');
+      }
+      if (this.isAncestorCycleTriggerError(err)) {
+        throw new BadRequestException('Quan hệ tạo vòng lặp tổ tiên');
+      }
+      throw err;
+    }
+
+    await this.syncMissingGenerationsInTx(tx, dto.type, fromProfile, toProfile);
+
+    await this.audit.log({
+      actorId,
+      action: 'CREATE_RELATIONSHIP',
+      entityType: AUDIT_ENTITY_TYPES.RELATIONSHIP,
+      entityId: created.id,
+      before: null,
+      after: created,
+      tx,
+    });
+
+    return created;
   }
 
   /**
@@ -162,6 +214,21 @@ export class RelationshipService {
         throw new BadRequestException('Quan hệ tạo vòng lặp tổ tiên trực tiếp');
       }
 
+      const conflictingSpouse = await tx.relationship.findFirst({
+        where: {
+          type: RelationType.SPOUSE,
+          OR: [
+            { fromId: dto.fromId, toId: dto.toId },
+            { fromId: dto.toId, toId: dto.fromId },
+          ],
+        },
+      });
+      if (conflictingSpouse) {
+        throw new BadRequestException(
+          'Hai hồ sơ đang có quan hệ vợ/chồng, không thể tạo quan hệ cha/mẹ - con',
+        );
+      }
+
       // Gọi cổng B3-01 (TreeRepository.isAncestor): nếu người nhận vai "con" (toId) đã là tổ tiên của "cha/mẹ" (fromId) -> vòng tổ tiên
       const createsCycle = await this.treeAncestorChecker.isAncestor(dto.toId, dto.fromId);
       if (createsCycle) {
@@ -181,6 +248,29 @@ export class RelationshipService {
     });
     if (duplicateSpouse) {
       throw new ConflictException('Quan hệ vợ/chồng này đã tồn tại');
+    }
+
+    const conflictingParentChild = await tx.relationship.findFirst({
+      where: {
+        type: RelationType.PARENT_CHILD,
+        OR: [
+          { fromId: dto.fromId, toId: dto.toId },
+          { fromId: dto.toId, toId: dto.fromId },
+        ],
+      },
+    });
+    if (conflictingParentChild) {
+      throw new BadRequestException('Không thể tạo quan hệ vợ/chồng giữa cha/mẹ và con');
+    }
+
+    const [fromIsAncestor, toIsAncestor] = await Promise.all([
+      this.treeAncestorChecker.isAncestor(dto.fromId, dto.toId),
+      this.treeAncestorChecker.isAncestor(dto.toId, dto.fromId),
+    ]);
+    if (fromIsAncestor || toIsAncestor) {
+      throw new BadRequestException(
+        'Không thể tạo quan hệ vợ/chồng giữa hai người có quan hệ huyết thống trực hệ',
+      );
     }
   }
 

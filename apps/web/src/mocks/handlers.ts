@@ -398,12 +398,68 @@ async function executeMockApi<T>(
     }
     if (body.fullName !== undefined) found.fullName = body.fullName.trim();
     if (body.gender !== undefined) found.gender = body.gender;
-    if (body.status !== undefined) found.status = body.status;
-    if (body.generation !== undefined) found.generation = body.generation;
-    if (body.bio !== undefined) found.bio = body.bio?.trim() || null;
     if (body.birthDate !== undefined) found.birthDate = body.birthDate;
     if (body.deathDate !== undefined) found.deathDate = body.deathDate;
-    if (body.deathCalendar !== undefined) found.deathCalendar = body.deathCalendar;
+    const nextStatus = body.status ?? found.status;
+    if (nextStatus === 'ALIVE' && found.deathDate && body.deathDate === undefined) {
+      found.deathDate = null;
+    }
+    if (nextStatus === 'ALIVE' && found.deathDate) {
+      throw new ApiError('Hồ sơ còn sống (ALIVE) không thể có ngày mất', 400);
+    }
+    if (
+      found.birthDate &&
+      found.deathDate &&
+      found.deathDate.slice(0, 10) < found.birthDate.slice(0, 10)
+    ) {
+      throw new ApiError('Ngày mất không được nhỏ hơn ngày sinh', 400);
+    }
+    if (
+      nextStatus === 'DECEASED' &&
+      found.accountId &&
+      db.accounts.some(
+        (a) => a.id === found.accountId && a.roles.some((r) => r.type === 'CLAN_HEAD'),
+      )
+    ) {
+      throw new ApiError(
+        'Không thể chuyển hồ sơ Trưởng họ đang đương nhiệm sang trạng thái Đã mất trước khi chuyển giao vai trò',
+        400,
+      );
+    }
+
+    const prevBranchId = found.branchId;
+    if (body.branchId !== undefined) found.branchId = body.branchId;
+    const branchChanged = body.branchId !== undefined && body.branchId !== prevBranchId;
+    if (found.accountId && (nextStatus === 'DECEASED' || branchChanged)) {
+      const targetAcc = db.accounts.find((a) => a.id === found.accountId);
+      for (const b of db.branches) {
+        if (
+          b.headAccountId === found.accountId &&
+          (nextStatus === 'DECEASED' || b.id === prevBranchId)
+        ) {
+          b.headAccountId = null;
+        }
+      }
+      if (targetAcc) {
+        targetAcc.roles = targetAcc.roles.filter(
+          (r) =>
+            !(
+              r.type === 'BRANCH_HEAD' &&
+              (nextStatus === 'DECEASED' || r.branchId === prevBranchId)
+            ),
+        );
+      }
+    }
+
+    found.status = nextStatus;
+    if (body.generation !== undefined) found.generation = body.generation;
+    if (body.bio !== undefined) found.bio = body.bio?.trim() || null;
+    found.deathCalendar =
+      nextStatus === 'ALIVE'
+        ? null
+        : body.deathCalendar !== undefined
+          ? body.deathCalendar
+          : found.deathCalendar;
     found.updatedAt = new Date(Date.now() + ++idCounter).toISOString();
     return { ...found } as T;
   }
@@ -428,6 +484,15 @@ async function executeMockApi<T>(
     const expected = url.searchParams.get('expectedUpdatedAt');
     if (expected && expected !== found.updatedAt) {
       throw new ApiError('Hồ sơ đã được cập nhật bởi thao tác khác, vui lòng tải lại', 409);
+    }
+    if (found.accountId) {
+      for (const b of db.branches) {
+        if (b.headAccountId === found.accountId) b.headAccountId = null;
+      }
+      const targetAcc = db.accounts.find((a) => a.id === found.accountId);
+      if (targetAcc) {
+        targetAcc.roles = targetAcc.roles.filter((r) => r.type !== 'BRANCH_HEAD');
+      }
     }
     found.status = 'REMOVED';
     found.updatedAt = new Date(Date.now() + ++idCounter).toISOString();
@@ -471,6 +536,19 @@ async function executeMockApi<T>(
       }
       if (
         db.relationships.some(
+          (r) =>
+            r.type === 'SPOUSE' &&
+            ((r.fromId === body.fromId && r.toId === body.toId) ||
+              (r.fromId === body.toId && r.toId === body.fromId)),
+        )
+      ) {
+        throw new ApiError(
+          'Hai hồ sơ đang có quan hệ vợ/chồng, không thể tạo quan hệ cha/mẹ - con',
+          400,
+        );
+      }
+      if (
+        db.relationships.some(
           (r) => r.type === 'PARENT_CHILD' && r.fromId === body.toId && r.toId === body.fromId,
         ) ||
         isAncestor(body.toId, body.fromId)
@@ -490,6 +568,21 @@ async function executeMockApi<T>(
         )
       ) {
         throw new ApiError('Quan hệ vợ/chồng này đã tồn tại', 409);
+      }
+      if (
+        db.relationships.some(
+          (r) =>
+            r.type === 'PARENT_CHILD' &&
+            ((r.fromId === body.fromId && r.toId === body.toId) ||
+              (r.fromId === body.toId && r.toId === body.fromId)),
+        ) ||
+        isAncestor(body.fromId, body.toId) ||
+        isAncestor(body.toId, body.fromId)
+      ) {
+        throw new ApiError(
+          'Không thể tạo quan hệ vợ/chồng giữa hai người có quan hệ huyết thống trực hệ',
+          400,
+        );
       }
       if (fromP.generation !== null && toP.generation === null) {
         toP.generation = fromP.generation;

@@ -153,6 +153,7 @@ function makeStatefulPrismaMock() {
               (!where.clanId || r.clanId === where.clanId) &&
               (!where.accountId || r.accountId === where.accountId) &&
               (!where.type || r.type === where.type) &&
+              (!where.branchId || r.branchId === where.branchId) &&
               (where.validTo === null ? r.validTo === null : true)
             ) {
               Object.assign(r, data);
@@ -498,5 +499,90 @@ describe('ProfileService (B2-03 & B2-05)', () => {
     expect(deleted.status).toBe(MemberStatus.REMOVED);
     const revokedRole = roleAssignments.find((r) => r.id === 'role-bh-2')!;
     expect(revokedRole.validTo).toBeInstanceOf(Date);
+  });
+
+  it('chặn đánh dấu Đã mất cho Trưởng họ đương nhiệm và tự thu hồi BRANCH_HEAD khi chuyển chi hoặc qua đời', async () => {
+    const clanHead = makeUser();
+    const headProfile = await service.createProfile(clanHead, {
+      branchId: BRANCH_1_ID,
+      fullName: 'Trưởng họ Đương nhiệm',
+      gender: Gender.MALE,
+    });
+    profiles.set(headProfile.id, {
+      ...profiles.get(headProfile.id)!,
+      accountId: clanHead.id,
+    });
+    roleAssignments.push({
+      id: 'role-clan-head-active',
+      accountId: clanHead.id,
+      type: RoleType.CLAN_HEAD,
+      clanId: CLAN_ID,
+      branchId: null,
+      validFrom: new Date(),
+      validTo: null,
+    });
+
+    await expect(
+      service.updateProfile(clanHead, headProfile.id, {
+        expectedUpdatedAt: headProfile.updatedAt.toISOString(),
+        status: MemberStatus.DECEASED,
+        deathDate: '2026-10-01',
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    // Trưởng chi chuyển sang chi khác -> tự thu hồi quyền BRANCH_HEAD chi cũ
+    const bhMoveProfile = await service.createProfile(clanHead, {
+      branchId: BRANCH_2_ID,
+      fullName: 'Trưởng Chi 2 Chuyển Chi',
+      gender: Gender.MALE,
+    });
+    profiles.set(bhMoveProfile.id, {
+      ...profiles.get(bhMoveProfile.id)!,
+      accountId: 'acc-bh-move',
+    });
+    roleAssignments.push({
+      id: 'role-bh-move',
+      accountId: 'acc-bh-move',
+      type: RoleType.BRANCH_HEAD,
+      clanId: CLAN_ID,
+      branchId: BRANCH_2_ID,
+      validFrom: new Date(),
+      validTo: null,
+    });
+
+    const moved = await service.updateProfile(clanHead, bhMoveProfile.id, {
+      expectedUpdatedAt: bhMoveProfile.updatedAt.toISOString(),
+      branchId: BRANCH_1_ID,
+    });
+    expect(moved.branchId).toBe(BRANCH_1_ID);
+    expect(roleAssignments.find((r) => r.id === 'role-bh-move')!.validTo).toBeInstanceOf(Date);
+
+    // Trưởng chi chuyển sang Đã mất -> tự thu hồi quyền BRANCH_HEAD
+    const bhDeceasedProfile = await service.createProfile(clanHead, {
+      branchId: BRANCH_1_ID,
+      fullName: 'Trưởng Chi 1 Qua Đời',
+      gender: Gender.MALE,
+    });
+    profiles.set(bhDeceasedProfile.id, {
+      ...profiles.get(bhDeceasedProfile.id)!,
+      accountId: 'acc-bh-dec',
+    });
+    roleAssignments.push({
+      id: 'role-bh-dec',
+      accountId: 'acc-bh-dec',
+      type: RoleType.BRANCH_HEAD,
+      clanId: CLAN_ID,
+      branchId: BRANCH_1_ID,
+      validFrom: new Date(),
+      validTo: null,
+    });
+
+    const markedDeceased = await service.updateProfile(clanHead, bhDeceasedProfile.id, {
+      expectedUpdatedAt: bhDeceasedProfile.updatedAt.toISOString(),
+      status: MemberStatus.DECEASED,
+      deathDate: '2026-10-01',
+    });
+    expect(markedDeceased.status).toBe(MemberStatus.DECEASED);
+    expect(roleAssignments.find((r) => r.id === 'role-bh-dec')!.validTo).toBeInstanceOf(Date);
   });
 });

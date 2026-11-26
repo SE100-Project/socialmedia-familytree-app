@@ -242,6 +242,19 @@ export class BranchService {
       );
     }
 
+    const headElsewhere = await tx.roleAssignment.findFirst({
+      where: {
+        clanId,
+        accountId: targetAccountId,
+        type: RoleType.BRANCH_HEAD,
+        branchId: { not: branchId },
+        validTo: null,
+      },
+    });
+    if (headElsewhere) {
+      throw new BadRequestException('Thành viên này đang giữ vai trò Trưởng chi ở một chi khác');
+    }
+
     // Nếu hồ sơ chưa thuộc chi nào, gắn vào chi được bổ nhiệm để đồng bộ phạm vi quản lý (không đổi quan hệ huyết thống BR-04)
     if (targetProfile.branchId === null) {
       await tx.memberProfile.update({
@@ -297,6 +310,7 @@ export class BranchService {
       branches.map((branch) =>
         db.memberProfile.count({
           where: {
+            clanId,
             branchId: branch.id,
             status: { not: MemberStatus.REMOVED },
           },
@@ -336,6 +350,7 @@ export class BranchService {
             where: {
               clanId,
               accountId: { in: accountIds },
+              status: { not: MemberStatus.REMOVED },
             },
             select: {
               id: true,

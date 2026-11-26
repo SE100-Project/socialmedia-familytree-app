@@ -1,10 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Clan, Relationship } from '@prisma/client';
-import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
-import { PolicyService } from '../auth/policy.service';
 import { CursorPaginationDto, PaginatedResult } from '../common/pagination.dto';
-import { PrismaService } from '../prisma/prisma.service';
 import { BranchService, BranchView } from './branch.service';
 import { ClanService, InitClanResult } from './clan.service';
 import {
@@ -14,35 +11,22 @@ import {
   ListRelationshipsQueryDto,
   UpdateBranchDto,
 } from './dto';
-import { ProfileService } from './profile.service';
 import { RelationshipService } from './relationship.service';
-import { TREE_ANCESTOR_CHECKER, TreeAncestorChecker } from './tree-ancestor.port';
 
 export type { BranchHeadSummary, BranchView } from './branch.service';
 export type { InitClanResult } from './clan.service';
 
 /**
  * Facade điều phối nhóm nghiệp vụ phả hệ (GRASP Facade / Indirection).
- * Ủy quyền hoàn toàn cho các service chuyên trách `ClanService`, `BranchService`, `RelationshipService` (SRP & High Cohesion).
+ * Nhận trực tiếp các NestJS singleton `ClanService`, `BranchService`, `RelationshipService` qua DI.
  */
 @Injectable()
 export class GenealogyService {
-  private readonly clanService: ClanService;
-  private readonly branchService: BranchService;
-  private readonly relationshipService: RelationshipService;
-
   constructor(
-    prisma: PrismaService,
-    policy: PolicyService,
-    audit: AuditService,
-    profileService: ProfileService,
-    @Inject(TREE_ANCESTOR_CHECKER)
-    treeAncestorChecker: TreeAncestorChecker,
-  ) {
-    this.clanService = new ClanService(prisma, policy, audit, profileService);
-    this.branchService = new BranchService(prisma, policy, audit);
-    this.relationshipService = new RelationshipService(prisma, policy, audit, treeAncestorChecker);
-  }
+    private readonly clanService: ClanService,
+    private readonly branchService: BranchService,
+    private readonly relationshipService: RelationshipService,
+  ) {}
 
   createClan(user: AuthUser, dto: CreateClanDto): Promise<InitClanResult> {
     return this.clanService.createClan(user, dto);

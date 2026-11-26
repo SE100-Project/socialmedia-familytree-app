@@ -199,81 +199,150 @@ export class ProfileService {
       // Kiểm tra quyền trên chi hiện tại trước khi tiết lộ trạng thái vòng đời hồ sơ
       this.policy.assertCanManageMember(user, existing.clanId, existing.branchId);
 
-      if (existing.status === MemberStatus.REMOVED) {
-        throw new BadRequestException('Không thể chỉnh sửa hồ sơ đã xóa mềm');
-      }
-
-      // Nếu đổi chi, kiểm tra chi mới thuộc dòng họ và nằm trong phạm vi quyền
       if (dto.branchId !== undefined && dto.branchId !== existing.branchId) {
-        if (dto.branchId !== null) {
-          await this.assertBranchBelongsToClan(tx, clanId, dto.branchId);
-        }
         this.policy.assertCanManageMember(user, clanId, dto.branchId);
       }
 
-      const nextStatus = dto.status ?? existing.status;
-      const parsedBirth = parseOptionalDate(dto.birthDate, 'Ngày sinh');
-      const parsedDeath = parseOptionalDate(dto.deathDate, 'Ngày mất');
-
-      const effectiveBirth = parsedBirth !== undefined ? parsedBirth : existing.birthDate;
-      // Khi chuyển từ DECEASED sang ALIVE mà không gửi deathDate mới, tự động xóa ngày mất cũ
-      const effectiveDeath =
-        nextStatus === MemberStatus.ALIVE && dto.deathDate === undefined
-          ? null
-          : parsedDeath !== undefined
-            ? parsedDeath
-            : existing.deathDate;
-
-      this.validateProfileDatesAndStatus(nextStatus, effectiveBirth, effectiveDeath);
-
-      const updateData: Prisma.MemberProfileUncheckedUpdateManyInput = {
-        ...(dto.branchId !== undefined ? { branchId: dto.branchId } : {}),
-        ...(dto.fullName !== undefined ? { fullName: dto.fullName.trim() } : {}),
-        ...(dto.gender !== undefined ? { gender: dto.gender } : {}),
-        ...(parsedBirth !== undefined ? { birthDate: parsedBirth } : {}),
-        ...(dto.deathDate !== undefined || nextStatus === MemberStatus.ALIVE
-          ? { deathDate: effectiveDeath }
-          : {}),
-        ...(nextStatus === MemberStatus.ALIVE
-          ? { deathCalendar: null }
-          : dto.deathCalendar !== undefined
-            ? { deathCalendar: dto.deathCalendar }
-            : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.generation !== undefined ? { generation: dto.generation } : {}),
-        ...(dto.bio !== undefined ? { bio: dto.bio === null ? null : dto.bio.trim() || null } : {}),
-      };
-
-      const result = await tx.memberProfile.updateMany({
-        where: {
-          id: profileId,
-          clanId,
-          updatedAt: expectedUpdatedAt,
-          status: { not: MemberStatus.REMOVED },
-        },
-        data: updateData,
+      return this.applyProfileUpdateInTx(tx, {
+        clanId,
+        profileId,
+        actorId: user.id,
+        dto,
+        expectedUpdatedAt,
+        existing,
       });
+    });
+  }
 
-      if (result.count === 0) {
-        throw new ConflictException(
-          'Hồ sơ đã bị thay đổi bởi một phiên làm việc khác, vui lòng tải lại trước khi lưu',
+  /**
+   * Thực thi cập nhật hồ sơ bên trong một transaction có sẵn (tái sử dụng cho Giai đoạn 2: `UC-13`, `UC-14`).
+   */
+  async applyProfileUpdateInTx(
+    tx: Prisma.TransactionClient,
+    params: {
+      clanId: string;
+      profileId: string;
+      actorId: string;
+      dto: UpdateProfileDto;
+      expectedUpdatedAt?: Date;
+      existing?: MemberProfile;
+    },
+  ): Promise<MemberProfile> {
+    const { clanId, profileId, actorId, dto } = params;
+    const expectedUpdatedAt = params.expectedUpdatedAt ?? new Date(dto.expectedUpdatedAt);
+    if (Number.isNaN(expectedUpdatedAt.getTime())) {
+      throw new BadRequestException('expectedUpdatedAt không hợp lệ');
+    }
+
+    const existing =
+      params.existing ?? (await tx.memberProfile.findUnique({ where: { id: profileId } }));
+    if (!existing || existing.clanId !== clanId) {
+      throw new NotFoundException('Không tìm thấy hồ sơ thành viên');
+    }
+
+    if (existing.status === MemberStatus.REMOVED) {
+      throw new BadRequestException('Không thể chỉnh sửa hồ sơ đã xóa mềm');
+    }
+
+    const branchChanged = dto.branchId !== undefined && dto.branchId !== existing.branchId;
+    if (branchChanged && dto.branchId !== null && dto.branchId !== undefined) {
+      await this.assertBranchBelongsToClan(tx, clanId, dto.branchId);
+    }
+
+    const nextStatus = dto.status ?? existing.status;
+
+    if (nextStatus === MemberStatus.DECEASED && existing.accountId) {
+      const activeHeadRole = await tx.roleAssignment.findFirst({
+        where: {
+          clanId,
+          accountId: existing.accountId,
+          type: RoleType.CLAN_HEAD,
+          validTo: null,
+        },
+      });
+      if (activeHeadRole) {
+        throw new BadRequestException(
+          'Không thể chuyển hồ sơ Trưởng họ đang đương nhiệm sang trạng thái Đã mất trước khi chuyển giao vai trò',
         );
       }
+    }
 
-      const after = await tx.memberProfile.findUniqueOrThrow({ where: { id: profileId } });
+    const parsedBirth = parseOptionalDate(dto.birthDate, 'Ngày sinh');
+    const parsedDeath = parseOptionalDate(dto.deathDate, 'Ngày mất');
 
-      await this.audit.log({
-        actorId: user.id,
-        action: 'UPDATE_PROFILE',
-        entityType: AUDIT_ENTITY_TYPES.MEMBER_PROFILE,
-        entityId: profileId,
-        before: existing,
-        after,
-        tx,
-      });
+    const effectiveBirth = parsedBirth !== undefined ? parsedBirth : existing.birthDate;
+    // Khi chuyển từ DECEASED sang ALIVE mà không gửi deathDate mới, tự động xóa ngày mất cũ
+    const effectiveDeath =
+      nextStatus === MemberStatus.ALIVE && dto.deathDate === undefined
+        ? null
+        : parsedDeath !== undefined
+          ? parsedDeath
+          : existing.deathDate;
 
-      return after;
+    this.validateProfileDatesAndStatus(nextStatus, effectiveBirth, effectiveDeath);
+
+    const updateData: Prisma.MemberProfileUncheckedUpdateManyInput = {
+      ...(dto.branchId !== undefined ? { branchId: dto.branchId } : {}),
+      ...(dto.fullName !== undefined ? { fullName: dto.fullName.trim() } : {}),
+      ...(dto.gender !== undefined ? { gender: dto.gender } : {}),
+      ...(parsedBirth !== undefined ? { birthDate: parsedBirth } : {}),
+      ...(dto.deathDate !== undefined || nextStatus === MemberStatus.ALIVE
+        ? { deathDate: effectiveDeath }
+        : {}),
+      ...(nextStatus === MemberStatus.ALIVE
+        ? { deathCalendar: null }
+        : dto.deathCalendar !== undefined
+          ? { deathCalendar: dto.deathCalendar }
+          : {}),
+      ...(dto.status !== undefined ? { status: dto.status } : {}),
+      ...(dto.generation !== undefined ? { generation: dto.generation } : {}),
+      ...(dto.bio !== undefined ? { bio: dto.bio === null ? null : dto.bio.trim() || null } : {}),
+    };
+
+    const result = await tx.memberProfile.updateMany({
+      where: {
+        id: profileId,
+        clanId,
+        updatedAt: expectedUpdatedAt,
+        status: { not: MemberStatus.REMOVED },
+      },
+      data: updateData,
     });
+
+    if (result.count === 0) {
+      throw new ConflictException(
+        'Hồ sơ đã bị thay đổi bởi một phiên làm việc khác, vui lòng tải lại trước khi lưu',
+      );
+    }
+
+    if (existing.accountId && (nextStatus === MemberStatus.DECEASED || branchChanged)) {
+      await tx.roleAssignment.updateMany({
+        where: {
+          clanId,
+          accountId: existing.accountId,
+          type: RoleType.BRANCH_HEAD,
+          ...(nextStatus === MemberStatus.DECEASED || existing.branchId === null
+            ? {}
+            : { branchId: existing.branchId }),
+          validTo: null,
+        },
+        data: { validTo: new Date() },
+      });
+    }
+
+    const after = await tx.memberProfile.findUniqueOrThrow({ where: { id: profileId } });
+
+    await this.audit.log({
+      actorId,
+      action: 'UPDATE_PROFILE',
+      entityType: AUDIT_ENTITY_TYPES.MEMBER_PROFILE,
+      entityId: profileId,
+      before: existing,
+      after,
+      tx,
+    });
+
+    return after;
   }
 
   /**
@@ -301,66 +370,95 @@ export class ProfileService {
 
       this.policy.assertCanManageMember(user, existing.clanId, existing.branchId);
 
-      if (existing.status === MemberStatus.REMOVED) {
-        throw new BadRequestException('Hồ sơ đã được xóa mềm trước đó');
-      }
-
-      if (existing.accountId) {
-        const activeHeadRole = await tx.roleAssignment.findFirst({
-          where: {
-            clanId,
-            accountId: existing.accountId,
-            type: RoleType.CLAN_HEAD,
-            validTo: null,
-          },
-        });
-        if (activeHeadRole) {
-          throw new BadRequestException('Không thể xóa mềm hồ sơ của Trưởng họ đang đương nhiệm');
-        }
-      }
-
-      const result = await tx.memberProfile.updateMany({
-        where: {
-          id: profileId,
-          clanId,
-          status: { not: MemberStatus.REMOVED },
-          ...(expectedUpdatedAt ? { updatedAt: expectedUpdatedAt } : {}),
-        },
-        data: { status: MemberStatus.REMOVED },
-      });
-
-      if (result.count === 0) {
-        throw new ConflictException(
-          'Hồ sơ đã được cập nhật hoặc xóa bởi thao tác khác, vui lòng tải lại',
-        );
-      }
-
-      if (existing.accountId) {
-        await tx.roleAssignment.updateMany({
-          where: {
-            clanId,
-            accountId: existing.accountId,
-            type: RoleType.BRANCH_HEAD,
-            validTo: null,
-          },
-          data: { validTo: new Date() },
-        });
-      }
-
-      const after = await tx.memberProfile.findUniqueOrThrow({ where: { id: profileId } });
-
-      await this.audit.log({
+      return this.applySoftDeleteInTx(tx, {
+        clanId,
+        profileId,
         actorId: user.id,
-        action: 'SOFT_DELETE_PROFILE',
-        entityType: AUDIT_ENTITY_TYPES.MEMBER_PROFILE,
-        entityId: profileId,
-        before: existing,
-        after,
-        tx,
+        expectedUpdatedAt,
+        existing,
       });
-
-      return after;
     });
+  }
+
+  /**
+   * Thực thi xóa mềm bên trong một transaction có sẵn (tái sử dụng cho Giai đoạn 2).
+   */
+  async applySoftDeleteInTx(
+    tx: Prisma.TransactionClient,
+    params: {
+      clanId: string;
+      profileId: string;
+      actorId: string;
+      expectedUpdatedAt?: Date;
+      existing?: MemberProfile;
+    },
+  ): Promise<MemberProfile> {
+    const { clanId, profileId, actorId, expectedUpdatedAt } = params;
+    const existing =
+      params.existing ?? (await tx.memberProfile.findUnique({ where: { id: profileId } }));
+    if (!existing || existing.clanId !== clanId) {
+      throw new NotFoundException('Không tìm thấy hồ sơ thành viên');
+    }
+
+    if (existing.status === MemberStatus.REMOVED) {
+      throw new BadRequestException('Hồ sơ đã được xóa mềm trước đó');
+    }
+
+    if (existing.accountId) {
+      const activeHeadRole = await tx.roleAssignment.findFirst({
+        where: {
+          clanId,
+          accountId: existing.accountId,
+          type: RoleType.CLAN_HEAD,
+          validTo: null,
+        },
+      });
+      if (activeHeadRole) {
+        throw new BadRequestException('Không thể xóa mềm hồ sơ của Trưởng họ đang đương nhiệm');
+      }
+    }
+
+    const result = await tx.memberProfile.updateMany({
+      where: {
+        id: profileId,
+        clanId,
+        status: { not: MemberStatus.REMOVED },
+        ...(expectedUpdatedAt ? { updatedAt: expectedUpdatedAt } : {}),
+      },
+      data: { status: MemberStatus.REMOVED },
+    });
+
+    if (result.count === 0) {
+      throw new ConflictException(
+        'Hồ sơ đã được cập nhật hoặc xóa bởi thao tác khác, vui lòng tải lại',
+      );
+    }
+
+    if (existing.accountId) {
+      await tx.roleAssignment.updateMany({
+        where: {
+          clanId,
+          accountId: existing.accountId,
+          type: RoleType.BRANCH_HEAD,
+          validTo: null,
+        },
+        data: { validTo: new Date() },
+      });
+    }
+
+    const after = await tx.memberProfile.findUniqueOrThrow({ where: { id: profileId } });
+
+    await this.audit.log({
+      actorId,
+      action: 'SOFT_DELETE_PROFILE',
+      entityType: AUDIT_ENTITY_TYPES.MEMBER_PROFILE,
+      entityId: profileId,
+      before: existing,
+      after,
+      tx,
+    });
+
+    return after;
   }
 
   private coerceDate(
