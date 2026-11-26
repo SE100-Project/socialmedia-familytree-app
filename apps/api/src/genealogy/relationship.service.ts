@@ -208,6 +208,7 @@ export class RelationshipService {
           type: RelationType.PARENT_CHILD,
           fromId: dto.toId,
           toId: dto.fromId,
+          active: true,
         },
       });
       if (reverseDirect) {
@@ -217,6 +218,7 @@ export class RelationshipService {
       const conflictingSpouse = await tx.relationship.findFirst({
         where: {
           type: RelationType.SPOUSE,
+          active: true,
           OR: [
             { fromId: dto.fromId, toId: dto.toId },
             { fromId: dto.toId, toId: dto.fromId },
@@ -253,6 +255,7 @@ export class RelationshipService {
     const conflictingParentChild = await tx.relationship.findFirst({
       where: {
         type: RelationType.PARENT_CHILD,
+        active: true,
         OR: [
           { fromId: dto.fromId, toId: dto.toId },
           { fromId: dto.toId, toId: dto.fromId },

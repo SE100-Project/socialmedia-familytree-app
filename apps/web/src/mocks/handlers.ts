@@ -308,6 +308,17 @@ async function executeMockApi<T>(
             400,
           );
         }
+        if (db.branches.some((b) => b.id !== branchId && b.headAccountId === target.accountId)) {
+          throw new ApiError('Thành viên này đang giữ vai trò Trưởng chi ở một chi khác', 400);
+        }
+        if (branch.headAccountId && branch.headAccountId !== target.accountId) {
+          const oldAcc = db.accounts.find((a) => a.id === branch.headAccountId);
+          if (oldAcc) {
+            oldAcc.roles = oldAcc.roles.filter(
+              (r) => !(r.type === 'BRANCH_HEAD' && r.branchId === branchId),
+            );
+          }
+        }
         target.branchId = branchId;
         branch.headAccountId = target.accountId;
         const nextAcc = db.accounts.find((a) => a.id === target.accountId);
@@ -537,6 +548,7 @@ async function executeMockApi<T>(
       if (
         db.relationships.some(
           (r) =>
+            r.active &&
             r.type === 'SPOUSE' &&
             ((r.fromId === body.fromId && r.toId === body.toId) ||
               (r.fromId === body.toId && r.toId === body.fromId)),
@@ -549,7 +561,11 @@ async function executeMockApi<T>(
       }
       if (
         db.relationships.some(
-          (r) => r.type === 'PARENT_CHILD' && r.fromId === body.toId && r.toId === body.fromId,
+          (r) =>
+            r.active &&
+            r.type === 'PARENT_CHILD' &&
+            r.fromId === body.toId &&
+            r.toId === body.fromId,
         ) ||
         isAncestor(body.toId, body.fromId)
       ) {
@@ -572,6 +588,7 @@ async function executeMockApi<T>(
       if (
         db.relationships.some(
           (r) =>
+            r.active &&
             r.type === 'PARENT_CHILD' &&
             ((r.fromId === body.fromId && r.toId === body.toId) ||
               (r.fromId === body.toId && r.toId === body.fromId)),

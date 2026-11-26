@@ -61,8 +61,8 @@ interface VerticalSliceStore {
     action: string;
     entityType: string;
     entityId: string;
-    beforeJson: unknown;
-    afterJson: unknown;
+    before: unknown;
+    after: unknown;
     createdAt: Date;
   }>;
   accountStatuses: Map<string, AccountStatus>;
@@ -334,6 +334,7 @@ function createVerticalSliceDb() {
         return (
           store.relationships.find((rel) => {
             if (where.type && rel.type !== where.type) return false;
+            if (where.active !== undefined && rel.active !== where.active) return false;
             if (where.OR) {
               return where.OR.some((c: any) => rel.fromId === c.fromId && rel.toId === c.toId);
             }
@@ -375,8 +376,8 @@ function createVerticalSliceDb() {
           action: data.action,
           entityType: data.entityType,
           entityId: data.entityId,
-          beforeJson: data.beforeJson ?? null,
-          afterJson: data.afterJson ?? null,
+          before: data.before ?? null,
+          after: data.after ?? null,
           createdAt: nextDate(),
         };
         store.auditLogs.push(row);

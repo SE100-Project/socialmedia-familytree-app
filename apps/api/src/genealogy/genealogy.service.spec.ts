@@ -291,6 +291,7 @@ function makeGenealogyMockDb() {
         return (
           store.relationships.find((rel) => {
             if (where.type && rel.type !== where.type) return false;
+            if (where.active !== undefined && rel.active !== where.active) return false;
             if (where.OR) {
               return where.OR.some(
                 (cond: any) => rel.fromId === cond.fromId && rel.toId === cond.toId,
