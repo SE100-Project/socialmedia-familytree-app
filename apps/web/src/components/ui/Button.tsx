@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes } from 'react';
 import { Spinner } from './Spinner';
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; size?: 'sm' | 'md' | 'lg'; isLoading?: boolean; fullWidth?: boolean };
-const colors = { primary: '#2563eb', secondary: '#e5e7eb', danger: '#dc2626', ghost: 'transparent' };
+const colors = { primary: '#8f1d2c', secondary: '#efe7db', danger: '#b91c1c', ghost: 'transparent' };
 export function Button({ variant = 'primary', size = 'md', isLoading = false, fullWidth = false, disabled, children, style, ...props }: ButtonProps) {
   const padding = { sm: '6px 10px', md: '9px 14px', lg: '12px 18px' }[size];
   const foreground = variant === 'secondary' || variant === 'ghost' ? '#111827' : '#fff';

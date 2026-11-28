@@ -5,11 +5,19 @@ import { HealthController } from './health/health.controller';
 import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
 import { JoinModule } from './join/join.module';
+import { GenealogyModule } from './genealogy/genealogy.module';
 
 // Modular monolith: mỗi nhóm use case là một module (xem docs/architecture.md).
 // Thêm module mới (genealogy, feed, events, funds, reports, audit...) vào imports ở đây.
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, AuditModule, JoinModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    AuthModule,
+    AuditModule,
+    JoinModule,
+    GenealogyModule,
+  ],
   controllers: [HealthController],
 })
 export class AppModule {}

@@ -342,6 +342,115 @@ async function main() {
     },
   });
 
+  // Mở rộng thêm 8 hồ sơ (tổng 20 hồ sơ, đủ 4 thế hệ, có thêm hồ sơ đã mất và hồ sơ cầu nối chưa liên kết tài khoản)
+  const p2Khai = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchThu.id,
+      fullName: 'Nguyễn Văn Khải',
+      gender: Gender.MALE,
+      generation: 2,
+      status: MemberStatus.DECEASED,
+      birthDate: new Date('1946-02-14'),
+      deathDate: new Date('2012-11-08'),
+      deathCalendar: CalendarType.LUNAR,
+      bio: 'Thứ nam đời thứ 2 thuộc Chi Thứ (đã mất)',
+    },
+  });
+
+  const p2NgocHoa = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchThu.id,
+      fullName: 'Trần Thị Ngọc Hoa',
+      gender: Gender.FEMALE,
+      generation: 2,
+      status: MemberStatus.DECEASED,
+      birthDate: new Date('1949-07-22'),
+      deathDate: new Date('2018-04-15'),
+      deathCalendar: CalendarType.LUNAR,
+      bio: 'Vợ cụ Nguyễn Văn Khải',
+    },
+  });
+
+  const p3Bao = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchThu.id,
+      fullName: 'Nguyễn Quốc Bảo',
+      gender: Gender.MALE,
+      generation: 3,
+      status: MemberStatus.ALIVE,
+      birthDate: new Date('1974-09-05'),
+      bio: 'Thành viên Chi Thứ (chưa liên kết tài khoản)',
+    },
+  });
+
+  const p3Ha = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchThu.id,
+      fullName: 'Lê Thị Thu Hà',
+      gender: Gender.FEMALE,
+      generation: 3,
+      status: MemberStatus.ALIVE,
+      birthDate: new Date('1976-12-19'),
+      bio: 'Con dâu Chi Thứ',
+    },
+  });
+
+  const p3Minh = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchTruong.id,
+      fullName: 'Nguyễn Ngọc Minh',
+      gender: Gender.MALE,
+      generation: 3,
+      status: MemberStatus.ALIVE,
+      birthDate: new Date('1975-06-11'),
+      bio: 'Em trai Trưởng họ Nguyễn Văn An (hồ sơ cầu nối chưa liên kết)',
+    },
+  });
+
+  const p3LanAnh = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchTruong.id,
+      fullName: 'Phạm Thị Lan Anh',
+      gender: Gender.FEMALE,
+      generation: 3,
+      status: MemberStatus.ALIVE,
+      birthDate: new Date('1978-08-27'),
+      bio: 'Vợ ông Nguyễn Ngọc Minh',
+    },
+  });
+
+  const p4Huy = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchThu.id,
+      fullName: 'Nguyễn Gia Huy',
+      gender: Gender.MALE,
+      generation: 4,
+      status: MemberStatus.ALIVE,
+      birthDate: new Date('2003-01-18'),
+      bio: 'Con trai ông Nguyễn Quốc Bảo (Chi Thứ)',
+    },
+  });
+
+  const p4Vy = await prisma.memberProfile.create({
+    data: {
+      clanId: clan.id,
+      branchId: branchTruong.id,
+      fullName: 'Nguyễn Thảo Vy',
+      gender: Gender.FEMALE,
+      generation: 4,
+      status: MemberStatus.ALIVE,
+      birthDate: new Date('2005-10-03'),
+      bio: 'Con gái ông Nguyễn Ngọc Minh (Chi Trưởng)',
+    },
+  });
+
   // 8. Bảng liên kết tài khoản - hồ sơ (AccountProfileLink)
   console.log('8. Tạo AccountProfileLink theo chuẩn CSDL v1.2...');
   await prisma.accountProfileLink.createMany({
@@ -384,6 +493,19 @@ async function main() {
       { type: RelationType.PARENT_CHILD, fromId: p3Cuc.id, toId: p4Dung.id },
       { type: RelationType.PARENT_CHILD, fromId: p3An.id, toId: p4Hanh.id },
       { type: RelationType.PARENT_CHILD, fromId: p3Cuc.id, toId: p4Hanh.id },
+      { type: RelationType.PARENT_CHILD, fromId: p1Khang.id, toId: p2Khai.id },
+      { type: RelationType.PARENT_CHILD, fromId: p1Mo.id, toId: p2Khai.id },
+      { type: RelationType.SPOUSE, fromId: p2Khai.id, toId: p2NgocHoa.id },
+      { type: RelationType.PARENT_CHILD, fromId: p2Khai.id, toId: p3Bao.id },
+      { type: RelationType.PARENT_CHILD, fromId: p2NgocHoa.id, toId: p3Bao.id },
+      { type: RelationType.SPOUSE, fromId: p3Bao.id, toId: p3Ha.id },
+      { type: RelationType.PARENT_CHILD, fromId: p3Bao.id, toId: p4Huy.id },
+      { type: RelationType.PARENT_CHILD, fromId: p3Ha.id, toId: p4Huy.id },
+      { type: RelationType.PARENT_CHILD, fromId: p2Thinh.id, toId: p3Minh.id },
+      { type: RelationType.PARENT_CHILD, fromId: p2Hoa.id, toId: p3Minh.id },
+      { type: RelationType.SPOUSE, fromId: p3Minh.id, toId: p3LanAnh.id },
+      { type: RelationType.PARENT_CHILD, fromId: p3Minh.id, toId: p4Vy.id },
+      { type: RelationType.PARENT_CHILD, fromId: p3LanAnh.id, toId: p4Vy.id },
     ],
   });
 
@@ -403,7 +525,8 @@ async function main() {
       clanId: clan.id,
       authorId: accTruongHo.id,
       category: 'THONG_BAO',
-      content: 'Chào mừng toàn thể con cháu dòng họ Nguyễn Tộc Đặng Giang đến với Cổng thông tin Gia phả số!',
+      content:
+        'Chào mừng toàn thể con cháu dòng họ Nguyễn Tộc Đặng Giang đến với Cổng thông tin Gia phả số!',
       status: ContentStatus.PUBLISHED,
       pinned: true,
       official: true,
